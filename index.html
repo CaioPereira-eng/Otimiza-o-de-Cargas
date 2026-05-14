@@ -380,24 +380,6 @@
     font-size: 11px;
     cursor: grab;
   }
-  .log-box {
-    margin-top: 24px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 18px;
-  }
-  .log-title {
-    font-family: 'Bebas Neue';
-    color: var(--accent);
-    font-size: 20px;
-    margin-bottom: 10px;
-  }
-  .log-content {
-    font-family: 'DM Mono';
-    font-size: 12px;
-    line-height: 1.6;
-  }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
@@ -451,7 +433,7 @@
   let GLOBAL_TRUCKS = [];
   let UNPLACED_ITEMS = [];
   let CURRENT_DRAG = null;
-  let preventedCollisions = 0, rotatedItemsCount = 0;
+  let rotatedItemsCount = 0;
   const PALETTE = ['#f5c518','#ff6b35','#3dd68c','#4f8ef7','#e040fb','#00bcd4','#ff5252','#69f0ae','#ffab40','#b388ff'];
 
   // helpers
@@ -495,7 +477,16 @@
       const p = parseFloat(row.querySelector('[data-field="p"]').value) || 0;
       const qty = parseInt(row.querySelector('[data-field="qty"]').value) || 1;
       if(!isNaN(c) && c>0 && !isNaN(l) && l>0) {
-        for(let i=0;i<qty;i++) items.push({ desc: qty>1 ? `${desc} (${i+1})` : desc, c, l, p });
+        for(let i=0;i<qty;i++) {
+          items.push({ 
+            desc: qty>1 ? `${desc} (${i+1})` : desc, 
+            w: c,          // largura (comprimento)
+            h: l,          // altura (largura)
+            p: p,
+            c_orig: c,
+            l_orig: l
+          });
+        }
       }
     });
     return items;
@@ -506,7 +497,7 @@
     [[ 'Viga W460x82', 12, 0.46, 0.984, 2 ], [ 'Viga W250x38', 12, 0.262, 0.462, 3 ], [ 'TUBO 12"', 12, 0.304, 0.135, 4 ], [ 'TUBO 10"', 11, 0.254, 0.153, 3 ]].forEach(i => addCargoRow(i[0], i[1], i[2], i[3], i[4]));
   }
 
-  // ---------- IMPORTAÇÃO CORRIGIDA para colunas: C, L, A (ignorado), P (t), Quant. ----------
+  // ---------- IMPORTAÇÃO (colunas: C, L, A ignorado, P (t), Quant.) ----------
   function normalizeHeader(str) {
     return String(str || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
@@ -522,7 +513,6 @@
   function importFromRows(rows) {
     clearAllCargos();
     if (!rows.length) return;
-    // primeira linha não vazia como cabeçalho?
     let headerRow = null;
     let dataStart = 0;
     for (let i = 0; i < Math.min(5, rows.length); i++) {
@@ -535,12 +525,6 @@
         break;
       }
     }
-    if (!headerRow) {
-      // assume que primeira linha é dados
-      headerRow = null;
-      dataStart = 0;
-    }
-    // mapeamento exato: "c", "l", "p (t)", "quant"
     let idxC = -1, idxL = -1, idxP = -1, idxQuant = -1, idxDesc = -1;
     if (headerRow) {
       const headers = headerRow.map(cell => normalizeHeader(String(cell)));
@@ -550,10 +534,8 @@
       idxQuant = findColumnIndex(headers, ['quant', 'qtd', 'quantidade', 'quant.']);
       idxDesc = findColumnIndex(headers, ['desc', 'descricao', 'nome', 'carga', 'item']);
     } else {
-      // fallback: ordem padrão: col0=desc, col1=C, col2=L, col3=P, col4=Quant
       idxDesc = 0; idxC = 1; idxL = 2; idxP = 3; idxQuant = 4;
     }
-    // se não achou algum essencial, tenta ordem padrão
     if (idxC === -1 || idxL === -1) {
       idxC = 1; idxL = 2; if(idxP===-1) idxP=3; if(idxQuant===-1) idxQuant=4; if(idxDesc===-1) idxDesc=0;
     }
@@ -576,7 +558,7 @@
         addCargoRow(desc.substring(0, 50), c, l, p, qty);
       }
     }
-    if (cargoRows.length === 0) alert('Nenhuma carga válida importada. Verifique se as colunas estão nomeadas como: C, L, P (t), Quant. (descrição opcional).');
+    if (cargoRows.length === 0) alert('Nenhuma carga válida importada. Verifique as colunas: C, L, P (t), Quant.');
   }
 
   document.getElementById('file-input').addEventListener('change', e => {
@@ -599,8 +581,9 @@
     e.target.value = '';
   });
 
-  // -------------------- MAXIMAL RECTANGLES PACKER --------------------
+  // -------------------- MAXIMAL RECTANGLES PACKER (CORRIGIDO) --------------------
   class MaximalRectangle { constructor(x,y,w,h) { this.x=x; this.y=y; this.w=w; this.h=h; } }
+  
   function splitFreeRects(freeRects, usedRect) {
     for(let i=freeRects.length-1; i>=0; i--) {
       const r = freeRects[i];
@@ -612,52 +595,82 @@
       if(usedRect.y + usedRect.h < r.y + r.h) freeRects.push(new MaximalRectangle(r.x, usedRect.y+usedRect.h, r.w, r.y+r.h - (usedRect.y+usedRect.h)));
     }
   }
+  
   function pruneRects(freeRects) {
     for(let i=freeRects.length-1;i>=0;i--) {
       const a=freeRects[i];
       if(a.w<=0.001 || a.h<=0.001) { freeRects.splice(i,1); continue; }
-      for(let j=freeRects.length-1;j>=0;j--) if(i!==j && freeRects[j].x<=a.x && freeRects[j].y<=a.y && freeRects[j].x+freeRects[j].w>=a.x+a.w && freeRects[j].y+freeRects[j].h>=a.y+a.h) { freeRects.splice(i,1); break; }
+      for(let j=freeRects.length-1;j>=0;j--) 
+        if(i!==j && freeRects[j].x<=a.x && freeRects[j].y<=a.y && freeRects[j].x+freeRects[j].w>=a.x+a.w && freeRects[j].y+freeRects[j].h>=a.y+a.h) 
+          { freeRects.splice(i,1); break; }
     }
   }
+  
   function tryPlaceMaximal(truck, item, truckC, truckL, maxW, margin, allowRotate) {
     if(truck.weightUsed + item.p > maxW) return false;
-    const variants = [[item.c, item.l]];
-    if(allowRotate && Math.abs(item.c-item.l)>0.001) variants.push([item.l, item.c]);
-    let best=null, bestRect=null, bestShort=Infinity, bestLong=Infinity;
+    const variants = [[item.w, item.h]];
+    if(allowRotate && Math.abs(item.w - item.h) > 0.001) variants.push([item.h, item.w]);
+    let best = null;
+    let bestShort = Infinity, bestLong = Infinity;
     for(let rect of truck.maxRects) {
       for(let [w,h] of variants) {
-        const wm = w + margin*2, hm = h + margin*2;
+        const wm = w + margin*2;
+        const hm = h + margin*2;
         if(wm <= rect.w && hm <= rect.h) {
-          const short = Math.min(rect.w-wm, rect.h-hm), long = Math.max(rect.w-wm, rect.h-hm);
-          if(short < bestShort || (short===bestShort && long<bestLong)) {
-            best = { x:rect.x, y:rect.y, w, h, rotated: (Math.abs(w-item.c)>0.001) };
-            bestRect = rect;
-            bestShort = short; bestLong = long;
+          const short = Math.min(rect.w - wm, rect.h - hm);
+          const long = Math.max(rect.w - wm, rect.h - hm);
+          if(short < bestShort || (short === bestShort && long < bestLong)) {
+            best = { x: rect.x, y: rect.y, w: w, h: h, rotated: (Math.abs(w - item.w) > 0.001) };
+            bestShort = short;
+            bestLong = long;
           }
         }
       }
     }
     if(!best) return false;
-    splitFreeRects(truck.maxRects, { x:best.x, y:best.y, w:best.w+margin*2, h:best.h+margin*2 });
+    
+    const usedRect = { x: best.x, y: best.y, w: best.w + margin*2, h: best.h + margin*2 };
+    splitFreeRects(truck.maxRects, usedRect);
     pruneRects(truck.maxRects);
-    const newItem = { x:best.x+margin, y:best.y+margin, w:best.w, h:best.h, desc:item.desc, p:item.p, rotated:best.rotated, c:item.c, l:item.l };
+    
+    const newItem = { 
+      x: best.x + margin, 
+      y: best.y + margin, 
+      w: best.w, 
+      h: best.h, 
+      desc: item.desc, 
+      p: item.p,
+      rotated: best.rotated,
+      c_orig: item.c_orig || item.w,
+      l_orig: item.l_orig || item.h
+    };
     for(let e of truck.items) if(rectanglesOverlap(e, newItem)) return false;
-    if(newItem.x<0 || newItem.y<0 || newItem.x+newItem.w>truckC || newItem.y+newItem.h>truckL) return false;
+    if(newItem.x < 0 || newItem.y < 0 || newItem.x + newItem.w > truckC || newItem.y + newItem.h > truckL) return false;
+    
     truck.items.push(newItem);
     truck.weightUsed += item.p;
     if(best.rotated) rotatedItemsCount++;
     return true;
   }
+  
   function pack2DMaximalRectangles(items, truckC, truckL, maxW, margin, allowRotate) {
-    const sorted = [...items].sort((a,b)=> (b.c*b.l)-(a.c*a.l));
+    const sorted = [...items].sort((a,b)=> (b.w*b.h) - (a.w*a.h));
     const trucks = [], unplaced = [];
     for(let item of sorted) {
-      let placed=false;
-      for(let t of trucks) if(tryPlaceMaximal(t, item, truckC, truckL, maxW, margin, allowRotate)) { placed=true; break; }
+      let placed = false;
+      for(let t of trucks) {
+        if(tryPlaceMaximal(t, item, truckC, truckL, maxW, margin, allowRotate)) {
+          placed = true;
+          break;
+        }
+      }
       if(!placed) {
-        const newTruck = { maxRects:[new MaximalRectangle(0,0,truckC,truckL)], items:[], weightUsed:0 };
-        if(tryPlaceMaximal(newTruck, item, truckC, truckL, maxW, margin, allowRotate)) trucks.push(newTruck);
-        else unplaced.push({ ...item });
+        const newTruck = { maxRects: [new MaximalRectangle(0,0,truckC,truckL)], items: [], weightUsed: 0 };
+        if(tryPlaceMaximal(newTruck, item, truckC, truckL, maxW, margin, allowRotate)) {
+          trucks.push(newTruck);
+        } else {
+          unplaced.push({ ...item }); // mantém w/h originais
+        }
       }
     }
     return { trucks, unplaced };
@@ -674,7 +687,7 @@
     return errors;
   }
 
-  // -------------------- DRAG & DROP GLOBAL --------------------
+  // -------------------- DRAG & DROP GLOBAL (com suporte a não alocados) --------------------
   function enableDrag(element, item, sourceTruck) {
     element.addEventListener('mousedown', e => {
       e.preventDefault();
@@ -696,6 +709,7 @@
       document.addEventListener('mouseup', onUp);
     });
   }
+  
   function highlightDropZones(x,y) {
     clearDropHighlights();
     document.querySelectorAll('.truck-editor').forEach(el => {
@@ -704,6 +718,7 @@
     });
   }
   function clearDropHighlights() { document.querySelectorAll('.truck-editor').forEach(el => el.classList.remove('drop-hover')); }
+  
   function finishDrop(e) {
     if(!CURRENT_DRAG) return;
     const { item, sourceTruck } = CURRENT_DRAG;
@@ -735,6 +750,7 @@
     updateWeights();
     rerenderResults();
   }
+  
   function validateItemPosition(item, truck) {
     const { truckC, truckL, truckMaxW } = getTruckDims();
     if(item.x<0||item.y<0||item.x+item.w>truckC||item.y+item.h>truckL) return false;
@@ -742,14 +758,17 @@
     for(let other of truck.items) if(other !== item) { if(rectanglesOverlap(item, other)) return false; totalWeight += other.p; }
     return totalWeight <= truckMaxW;
   }
+  
   function snapToBestPosition(item, truck) {
     const { truckC, truckL } = getTruckDims();
-    for(let y=0; y<=truckL-item.h; y+=0.05) for(let x=0; x<=truckC-item.w; x+=0.05) {
-      item.x=x; item.y=y;
-      if(validateItemPosition(item, truck)) return true;
-    }
+    for(let y=0; y<=truckL-item.h; y+=0.05) 
+      for(let x=0; x<=truckC-item.w; x+=0.05) {
+        item.x=x; item.y=y;
+        if(validateItemPosition(item, truck)) return true;
+      }
     return false;
   }
+  
   function getTruckDims() {
     return {
       truckC: parseFloat(document.getElementById('truck-c').value)||14,
@@ -776,9 +795,16 @@
       rotBtn.innerHTML = '↻'; rotBtn.style.position='absolute'; rotBtn.style.top='2px'; rotBtn.style.right='2px';
       rotBtn.style.zIndex='20'; rotBtn.style.fontSize='10px'; rotBtn.style.background='rgba(0,0,0,0.5)'; rotBtn.style.color='white';
       rotBtn.style.border='none'; rotBtn.style.borderRadius='2px'; rotBtn.style.cursor='pointer';
-      rotBtn.addEventListener('click', (ev) => { ev.stopPropagation();
-        const oldW=item.w, oldH=item.h; item.w=item.h; item.h=oldW; item.rotated=!item.rotated;
-        if(!validateItemPosition(item, truck)) { item.w=oldW; item.h=oldH; item.rotated=!item.rotated; alert('Rotação não permitida: sem espaço.'); }
+      rotBtn.addEventListener('click', (ev) => { 
+        ev.stopPropagation();
+        const oldW = item.w, oldH = item.h;
+        item.w = oldH; item.h = oldW;
+        item.rotated = !item.rotated;
+        if(!validateItemPosition(item, truck)) {
+          item.w = oldW; item.h = oldH;
+          item.rotated = !item.rotated;
+          alert('Rotação não permitida: sem espaço ou ultrapassa limites.');
+        }
         rerenderResults();
       });
       div.appendChild(rotBtn);
@@ -786,11 +812,12 @@
       container.appendChild(div);
     });
   }
+  
   function renderUnplaced() {
     const container = document.getElementById('unplaced-items');
     if(!container) return;
     container.innerHTML = '';
-    UNPLACED_ITEMS.forEach((item, idx) => {
+    UNPLACED_ITEMS.forEach((item) => {
       const div = document.createElement('div');
       div.className = 'unplaced-box';
       div.innerHTML = `<strong>${item.desc}</strong><br>${item.w.toFixed(2)}m x ${item.h.toFixed(2)}m${item.p?` | ${item.p}t`:''}`;
@@ -798,6 +825,7 @@
       container.appendChild(div);
     });
   }
+  
   function rerenderResults() {
     const { truckC, truckL, truckMaxW } = getTruckDims();
     const panel = document.getElementById('results-panel');
@@ -827,13 +855,14 @@
       renderUnplaced();
     }, 50);
   }
+  
   window.addNewTruck = () => { GLOBAL_TRUCKS.push({ maxRects:[], items:[], weightUsed:0 }); rerenderResults(); };
   window.removeTruckById = (idx) => { UNPLACED_ITEMS.push(...GLOBAL_TRUCKS[idx].items); GLOBAL_TRUCKS.splice(idx,1); rerenderResults(); };
-  function resetCounters() { preventedCollisions=0; rotatedItemsCount=0; }
+  
   function runOptimization() {
     const items = getCargoData();
     if(items.length===0) { alert('Adicione pelo menos uma carga.'); return; }
-    resetCounters();
+    rotatedItemsCount = 0;
     const truckC = parseFloat(document.getElementById('truck-c').value)||14;
     const truckL = parseFloat(document.getElementById('truck-l').value)||2.6;
     const truckMaxW = parseFloat(document.getElementById('truck-w').value)||30;
@@ -844,8 +873,10 @@
     UNPLACED_ITEMS = unplaced;
     updateWeights();
     rerenderResults();
+    console.log(`Otimização concluída. Rotações: ${rotatedItemsCount}`);
   }
-  // exemplo inicial
+  
+  // inicialização com exemplo
   loadExample();
   setTimeout(() => runOptimization(), 100);
 </script>
