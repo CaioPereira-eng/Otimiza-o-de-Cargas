@@ -433,18 +433,18 @@
       </div>
       <div class="rotate-toggle">
         <input type="checkbox" id="allow-rotate" checked>
-        <label for="allow-rotate">Permitir rotacao 90 das cargas</label>
+        <label for="allow-rotate">Permitir rotacao 90</label>
       </div>
-      <div class="tip">Padrao: carreta sider/bau 14m x 2,6m, 30t</div>
+      <div class="tip">Padrao: 14m x 2,6m, 30t</div>
     </div>
 
     <div class="cargo-section">
       <h3>Lista de Cargas</h3>
       <div class="upload-zone" onclick="document.getElementById('file-input').click()">
-        Importar CSV / planilha
+        Importar planilha
       </div>
-      <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt">
-      <div class="tip" style="margin-bottom:10px">CSV: Descricao, C (m), L (m), P (t), Qtd</div>
+      <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt,.tsv">
+      <div class="tip" style="margin-bottom:10px">Excel/CSV: Desc, C, L, P, Qtd</div>
 
       <div class="cargo-header">
         <span class="h-desc">Descricao</span>
@@ -464,7 +464,7 @@
       </div>
 
       <div style="margin-top:14px">
-        <button class="btn btn-primary btn-run" onclick="runOptimization()">Otimizar Carregamento</button>
+        <button class="btn btn-primary btn-run" onclick="runOptimization()">Otimizar</button>
       </div>
     </div>
   </div>
@@ -483,7 +483,13 @@ const PALETTE = ['#f5c518','#ff6b35','#3dd68c','#4f8ef7','#e040fb','#00bcd4','#f
 let cargoRows = [];
 let rowId = 0;
 
-function addCargoRow(desc='', c='', l='', p='', qty='1') {
+function addCargoRow(desc, c, l, p, qty) {
+  if (desc === undefined) desc = '';
+  if (c === undefined) c = '';
+  if (l === undefined) l = '';
+  if (p === undefined) p = '';
+  if (qty === undefined) qty = '1';
+  
   const id = rowId++;
   cargoRows.push(id);
   const list = document.getElementById('cargo-list');
@@ -505,7 +511,7 @@ function addCargoRow(desc='', c='', l='', p='', qty='1') {
 function removeRow(id) {
   const el = document.getElementById('row-' + id);
   if (el) el.remove();
-  cargoRows = cargoRows.filter(r => r !== id);
+  cargoRows = cargoRows.filter(function(r) { return r !== id; });
 }
 
 function clearAll() {
@@ -516,7 +522,7 @@ function clearAll() {
 
 function getCargoData() {
   const items = [];
-  document.querySelectorAll('.cargo-row').forEach(row => {
+  document.querySelectorAll('.cargo-row').forEach(function(row) {
     const desc = row.querySelector('[data-field="desc"]').value.trim() || 'Carga';
     const c = parseFloat(row.querySelector('[data-field="c"]').value);
     const l = parseFloat(row.querySelector('[data-field="l"]').value);
@@ -524,7 +530,7 @@ function getCargoData() {
     const qty = parseInt(row.querySelector('[data-field="qty"]').value) || 1;
     if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
       for (let i = 0; i < qty; i++) {
-        items.push({ desc: qty > 1 ? desc + ' (' + (i+1) + ')' : desc, c, l, p, orig: desc });
+        items.push({ desc: qty > 1 ? desc + ' (' + (i+1) + ')' : desc, c: c, l: l, p: p, orig: desc });
       }
     }
   });
@@ -552,19 +558,36 @@ document.getElementById('file-input').addEventListener('change', function(e) {
   reader.onload = function(ev) {
     try {
       const text = ev.target.result;
-      const lines = text.split('\n').filter(function(l) { return l.trim(); });
+      const lines = text.split(/\r?\n/).filter(function(l) { return l.trim(); });
       clearAll();
       
       let headerFound = false;
       let headerIdx = -1;
+      let delimiter = '\t';
 
       for (let i = 0; i < Math.min(5, lines.length); i++) {
-        const parts = parseCSVLine(lines[i]);
+        let parts = parseDelimitedLine(lines[i], '\t');
+        
+        if (parts.length < 4) {
+          parts = parseDelimitedLine(lines[i], ',');
+        }
+        if (parts.length < 4) {
+          parts = parseDelimitedLine(lines[i], ';');
+        }
+        
         if (parts.length >= 4) {
-          const first = parts[0].toLowerCase();
-          if (first.includes('descricao') || first.includes('description') || first.includes('cargo')) {
+          const first = parts[0].toLowerCase().trim();
+          const second = parts[1].toLowerCase().trim();
+          
+          if (first.includes('descricao') || first.includes('description') || first.includes('cargo') ||
+              first.includes('carga') || second === 'c' || second === 'length') {
             headerFound = true;
             headerIdx = i;
+            
+            if (lines[i].indexOf('\t') > -1) delimiter = '\t';
+            else if (lines[i].indexOf(',') > -1) delimiter = ',';
+            else if (lines[i].indexOf(';') > -1) delimiter = ';';
+            
             break;
           }
         }
@@ -572,32 +595,34 @@ document.getElementById('file-input').addEventListener('change', function(e) {
 
       const startIdx = headerFound ? headerIdx + 1 : 0;
       for (let i = startIdx; i < lines.length; i++) {
-        const parts = parseCSVLine(lines[i]);
+        const parts = parseDelimitedLine(lines[i], delimiter);
+        
         if (parts.length >= 4) {
-          const desc = parts[0].trim() || 'Carga';
-          const c = parseFloat(parts[1]);
-          const l = parseFloat(parts[2]);
-          const p = parseFloat(parts[3]) || 0;
-          const qty = parseInt(parts[4] || '1') || 1;
+          let desc = parts[0].trim();
+          let c = parseFloat(parts[1]);
+          let l = parseFloat(parts[2]);
+          let p = parseFloat(parts[3]) || 0;
+          let qty = parseInt(parts[4] || '1') || 1;
           
-          if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+          if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+            desc = desc.replace(/[\r\n"]/g, '').substring(0, 50);
             addCargoRow(desc, c, l, p, qty);
           }
         }
       }
       
       if (cargoRows.length === 0) {
-        alert('Nenhuma linha valida foi importada.');
+        alert('Nenhuma linha valida foi importada. Verifique se o arquivo tem colunas: Descricao, C, L, P, Qtd');
       }
     } catch (err) {
       alert('Erro ao importar: ' + err.message);
     }
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'UTF-8');
   e.target.value = '';
 });
 
-function parseCSVLine(line) {
+function parseDelimitedLine(line, delimiter) {
   const result = [];
   let current = '';
   let insideQuotes = false;
@@ -607,7 +632,7 @@ function parseCSVLine(line) {
 
     if (char === '"') {
       insideQuotes = !insideQuotes;
-    } else if ((char === ',' || char === ';') && !insideQuotes) {
+    } else if (char === delimiter && !insideQuotes) {
       result.push(current.trim().replace(/"/g, ''));
       current = '';
     } else {
@@ -827,7 +852,7 @@ function runOptimization() {
 
     html += '<div class="truck-card"><div class="truck-card-header">' +
       '<div class="truck-id">Carreta <span>#' + (ti + 1) + '</span></div>' +
-      '<span class="truck-util ' + utilClass + '">' + util.toFixed(1) + '% ocupado</span></div>' +
+      '<span class="truck-util ' + utilClass + '">' + util.toFixed(1) + '%</span></div>' +
       '<div class="truck-canvas-wrap"><canvas id="' + canvasId + '" class="truck-canvas"></canvas></div>' +
       '<div class="truck-cargo-list">';
 
@@ -844,7 +869,7 @@ function runOptimization() {
 
     const wUtil = truckMaxW > 0 ? (truck.weightUsed / truckMaxW * 100).toFixed(0) : '-';
     html += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">' +
-      '<span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text-muted)">Area: ' + util.toFixed(1) + '% | Peso: ' + truck.weightUsed.toFixed(2) + 't / ' + truckMaxW + 't (' + wUtil + '%)</span>' +
+      '<span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text-muted)">Area: ' + util.toFixed(1) + '% | Peso: ' + truck.weightUsed.toFixed(2) + 't (' + wUtil + '%)</span>' +
       '</div></div></div>';
   }
 
