@@ -398,6 +398,9 @@
   .rotate-toggle input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
   .rotate-toggle label { font-size: 12px; color: var(--text-muted); cursor: pointer; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -554,73 +557,98 @@ function loadExample() {
 document.getElementById('file-input').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(ev) {
-    try {
-      const text = ev.target.result;
-      const lines = text.split(/\r?\n/).filter(function(l) { return l.trim(); });
-      clearAll();
-      
-      let headerFound = false;
-      let headerIdx = -1;
-      let delimiter = '\t';
-
-      for (let i = 0; i < Math.min(5, lines.length); i++) {
-        let parts = parseDelimitedLine(lines[i], '\t');
-        
-        if (parts.length < 4) {
-          parts = parseDelimitedLine(lines[i], ',');
-        }
-        if (parts.length < 4) {
-          parts = parseDelimitedLine(lines[i], ';');
-        }
-        
-        if (parts.length >= 4) {
-          const first = parts[0].toLowerCase().trim();
-          const second = parts[1].toLowerCase().trim();
-          
-          if (first.includes('descricao') || first.includes('description') || first.includes('cargo') ||
-              first.includes('carga') || second === 'c' || second === 'length') {
-            headerFound = true;
-            headerIdx = i;
-            
-            if (lines[i].indexOf('\t') > -1) delimiter = '\t';
-            else if (lines[i].indexOf(',') > -1) delimiter = ',';
-            else if (lines[i].indexOf(';') > -1) delimiter = ';';
-            
-            break;
-          }
-        }
+  
+  const fileName = file.name.toLowerCase();
+  const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+  
+  if (isExcel) {
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        const data = new Uint8Array(ev.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        importRows(rows);
+      } catch (err) {
+        alert('Erro ao importar Excel: ' + err.message);
       }
-
-      const startIdx = headerFound ? headerIdx + 1 : 0;
-      for (let i = startIdx; i < lines.length; i++) {
-        const parts = parseDelimitedLine(lines[i], delimiter);
-        
-        if (parts.length >= 4) {
-          let desc = parts[0].trim();
-          let c = parseFloat(parts[1]);
-          let l = parseFloat(parts[2]);
-          let p = parseFloat(parts[3]) || 0;
-          let qty = parseInt(parts[4] || '1') || 1;
-          
-          if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
-            desc = desc.replace(/[\r\n"]/g, '').substring(0, 50);
-            addCargoRow(desc, c, l, p, qty);
-          }
-        }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        const text = ev.target.result;
+        const lines = text.split(/\r?\n/).filter(function(l) { return l.trim(); });
+        const rows = lines.map(function(line) {
+          return parseDelimitedLine(line, '\t').length >= 4 ? parseDelimitedLine(line, '\t') :
+                 parseDelimitedLine(line, ',').length >= 4 ? parseDelimitedLine(line, ',') :
+                 parseDelimitedLine(line, ';');
+        });
+        importRows(rows);
+      } catch (err) {
+        alert('Erro ao importar: ' + err.message);
       }
-      
-      if (cargoRows.length === 0) {
-        alert('Nenhuma linha valida foi importada. Verifique se o arquivo tem colunas: Descricao, C, L, P, Qtd');
-      }
-    } catch (err) {
-      alert('Erro ao importar: ' + err.message);
-    }
-  };
-  reader.readAsText(file, 'UTF-8');
+    };
+    reader.readAsText(file, 'UTF-8');
+  }
   e.target.value = '';
 });
+
+function importRows(rows) {
+  clearAll();
+  
+  if (rows.length === 0) {
+    alert('Nenhuma linha valida foi importada.');
+    return;
+  }
+  
+  let headerFound = false;
+  let headerIdx = -1;
+  
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const row = rows[i];
+    if (row.length >= 4) {
+      const first = (row[0] || '').toLowerCase().trim();
+      const second = (row[1] || '').toLowerCase().trim();
+      
+      if (first.includes('descricao') || first.includes('description') || first.includes('cargo') ||
+          first.includes('carga') || second === 'c' || second === 'length') {
+        headerFound = true;
+        headerIdx = i;
+        break;
+      }
+    }
+  }
+  
+  const startIdx = headerFound ? headerIdx + 1 : 0;
+  for (let i = startIdx; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.length >= 4) {
+      let desc = (row[0] || '').trim();
+      let cStr = (row[1] || '').toString().replace(',', '.');
+      let lStr = (row[2] || '').toString().replace(',', '.');
+      let pStr = (row[3] || '').toString().replace(',', '.');
+      let qtyStr = (row[4] || '1').toString();
+      
+      let c = parseFloat(cStr);
+      let l = parseFloat(lStr);
+      let p = parseFloat(pStr) || 0;
+      let qty = parseInt(qtyStr) || 1;
+      
+      if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+        desc = desc.replace(/[\r\n"]/g, '').substring(0, 50);
+        addCargoRow(desc, c, l, p, qty);
+      }
+    }
+  }
+  
+  if (cargoRows.length === 0) {
+    alert('Nenhuma linha valida foi importada. Verifique se o arquivo tem colunas: Descricao, C, L, P, Qtd');
+  }
+}
 
 function parseDelimitedLine(line, delimiter) {
   const result = [];
@@ -645,6 +673,9 @@ function parseDelimitedLine(line, delimiter) {
 
 class MaximalRectangle {
   constructor(x, y, w, h) {
+    if (w <= 0 || h <= 0 || isNaN(w) || isNaN(h)) {
+      throw new Error('Invalid rectangle dimensions');
+    }
     this.x = x;
     this.y = y;
     this.w = w;
@@ -654,7 +685,7 @@ class MaximalRectangle {
 }
 
 function pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate) {
-  const sorted = items.slice().sort(function(a, b) { return Math.max(b.c, b.l) - Math.max(a.c, a.l); });
+  const sorted = items.slice().sort(function(a, b) { return (b.c * b.l) - (a.c * a.l); });
   const trucks = [];
 
   for (let idx = 0; idx < sorted.length; idx++) {
@@ -780,59 +811,74 @@ function splitFreeRects(freeRects, freeRect, usedRect) {
 
   const newRects = [];
 
-  for (let i = 0; i < freeRects.length; i++) {
+  // Only split the specific freeRect, not all intersecting ones
+  const rect = freeRect;
 
-    const rect = freeRects[i];
+  if (
+    usedRect.x >= rect.x + rect.w ||
+    usedRect.x + usedRect.w <= rect.x ||
+    usedRect.y >= rect.y + rect.h ||
+    usedRect.y + usedRect.h <= rect.y
+  ) {
+    // No intersection, do nothing
+    return;
+  }
 
-    if (
-      usedRect.x >= rect.x + rect.w ||
-      usedRect.x + usedRect.w <= rect.x ||
-      usedRect.y >= rect.y + rect.h ||
-      usedRect.y + usedRect.h <= rect.y
-    ) {
-      continue;
-    }
-
-    if (usedRect.x > rect.x) {
+  if (usedRect.x > rect.x) {
+    const w = usedRect.x - rect.x;
+    if (w > 0) {
       newRects.push(new MaximalRectangle(
         rect.x,
         rect.y,
-        usedRect.x - rect.x,
+        w,
         rect.h
       ));
     }
+  }
 
-    if (usedRect.x + usedRect.w < rect.x + rect.w) {
+  if (usedRect.x + usedRect.w < rect.x + rect.w) {
+    const w = rect.x + rect.w - (usedRect.x + usedRect.w);
+    if (w > 0) {
       newRects.push(new MaximalRectangle(
         usedRect.x + usedRect.w,
         rect.y,
-        rect.x + rect.w - (usedRect.x + usedRect.w),
+        w,
         rect.h
       ));
     }
+  }
 
-    if (usedRect.y > rect.y) {
+  if (usedRect.y > rect.y) {
+    const h = usedRect.y - rect.y;
+    if (h > 0) {
       newRects.push(new MaximalRectangle(
         rect.x,
         rect.y,
         rect.w,
-        usedRect.y - rect.y
+        h
       ));
     }
+  }
 
-    if (usedRect.y + usedRect.h < rect.y + rect.h) {
+  if (usedRect.y + usedRect.h < rect.y + rect.h) {
+    const h = rect.y + rect.h - (usedRect.y + usedRect.h);
+    if (h > 0) {
       newRects.push(new MaximalRectangle(
         rect.x,
         usedRect.y + usedRect.h,
         rect.w,
-        rect.y + rect.h - (usedRect.y + usedRect.h)
+        h
       ));
     }
-
-    freeRects.splice(i, 1);
-    i--;
   }
 
+  // Remove the original freeRect
+  const index = freeRects.indexOf(freeRect);
+  if (index > -1) {
+    freeRects.splice(index, 1);
+  }
+
+  // Add new rectangles
   freeRects.push(...newRects);
 }
 
