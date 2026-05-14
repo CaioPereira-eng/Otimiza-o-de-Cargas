@@ -310,12 +310,6 @@
   .truck-canvas-wrap {
     padding: 14px;
   }
-  canvas.truck-canvas {
-    display: block;
-    width: 100%;
-    border-radius: 3px;
-    background: var(--truck-bg);
-  }
 
   .truck-cargo-list {
     padding: 0 16px 14px;
@@ -397,6 +391,55 @@
   }
   .rotate-toggle input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
   .rotate-toggle label { font-size: 12px; color: var(--text-muted); cursor: pointer; }
+
+  .truck-editor {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    background: var(--truck-bg);
+    border: 2px solid #2a3a6a;
+    overflow: hidden;
+    border-radius: 4px;
+  }
+
+  .cargo-box {
+    position: absolute;
+    border: 2px solid rgba(0,0,0,0.4);
+    border-radius: 3px;
+    cursor: grab;
+    user-select: none;
+    transition: box-shadow 0.15s, transform 0.05s;
+    overflow: hidden;
+  }
+
+  .cargo-box:hover {
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
+  }
+
+  .cargo-box.dragging {
+    opacity: 0.85;
+    z-index: 9999;
+    cursor: grabbing;
+  }
+
+  .cargo-box.invalid {
+    background: rgba(255,0,0,0.5) !important;
+    border-color: #ff0000;
+  }
+
+  .cargo-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: rgba(0,0,0,0.8);
+    font-weight: bold;
+    text-align: center;
+    pointer-events: none;
+  }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -1090,65 +1133,135 @@ function validateTruck(truck, truckC, truckL) {
   return errors;
 }
 
-function drawTruck(canvas, truck, truckC, truckL) {
-  const scale = Math.min((canvas.offsetWidth * 2) / truckC, 160 / truckL);
-  canvas.width = Math.round(truckC * scale);
-  canvas.height = Math.round(truckL * scale);
-  canvas.style.height = (canvas.height / 2) + 'px';
+function updateCargoVisual(el, item, truckC, truckL) {
 
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const parent = el.parentElement;
 
-  ctx.fillStyle = '#10162a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-  ctx.lineWidth = 1;
-  const grid = 1 * scale;
-  for (let x = 0; x <= canvas.width; x += grid) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= canvas.height; y += grid) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
-    ctx.stroke();
-  }
+  const scaleX = parent.clientWidth / truckC;
+  const scaleY = parent.clientHeight / truckL;
 
-  ctx.strokeStyle = '#2a3a6a';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  el.style.left = (item.x * scaleX) + 'px';
+  el.style.top = (item.y * scaleY) + 'px';
+}
 
-  for (let i = 0; i < truck.items.length; i++) {
-    const item = truck.items[i];
-    const color = PALETTE[i % PALETTE.length];
-    const x = item.x * scale, y = item.y * scale;
-    const w = item.w * scale, h = item.h * scale;
+function validateTruckVisual(truck, currentEl, currentItem) {
 
-    ctx.globalAlpha = 0.82;
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, w, h);
+  let invalid = false;
 
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle =
-      item.rotated
-        ? '#f5c518'
-        : '#0d0f14';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x, y, w, h);
+  for (const other of truck.items) {
 
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.font = 'bold ' + Math.max(9, Math.min(13, w / 5)) + 'px DM Mono, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const label = item.w.toFixed(1) + 'x' + item.h.toFixed(1);
-    if (w > 28 && h > 14) {
-      ctx.fillText(label, x + w / 2, y + h / 2);
+    if (other === currentItem) continue;
+
+    if (rectanglesOverlap(currentItem, other)) {
+      invalid = true;
+      break;
     }
   }
-  ctx.globalAlpha = 1;
+
+  if (invalid) {
+    currentEl.classList.add('invalid');
+  } else {
+    currentEl.classList.remove('invalid');
+  }
+}
+
+function enableDrag(el, truck, item, truckC, truckL) {
+
+  let startX = 0;
+  let startY = 0;
+
+  el.addEventListener('mousedown', startDrag);
+
+  function startDrag(e) {
+
+    e.preventDefault();
+
+    el.classList.add('dragging');
+
+    startX = e.clientX;
+    startY = e.clientY;
+
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('mouseup', stopDrag);
+  }
+
+  function drag(e) {
+
+    const editor = el.parentElement;
+
+    const scaleX = truckC / editor.clientWidth;
+    const scaleY = truckL / editor.clientHeight;
+
+    const dx = (e.clientX - startX) * scaleX;
+    const dy = (e.clientY - startY) * scaleY;
+
+    startX = e.clientX;
+    startY = e.clientY;
+
+    item.x += dx;
+    item.y += dy;
+
+    item.x = Math.max(0, Math.min(truckC - item.w, item.x));
+    item.y = Math.max(0, Math.min(truckL - item.h, item.y));
+
+    item.x = Math.round(item.x * 20) / 20;
+    item.y = Math.round(item.y * 20) / 20;
+
+    updateCargoVisual(el, item, truckC, truckL);
+
+    validateTruckVisual(truck, el, item);
+  }
+
+  function stopDrag() {
+
+    el.classList.remove('dragging');
+
+    document.removeEventListener('mousemove', drag);
+    document.removeEventListener('mouseup', stopDrag);
+
+    refreshStats();
+  }
+}
+
+function renderTruckEditor(container, truck, truckC, truckL, truckIndex) {
+
+  container.innerHTML = '';
+
+  const scaleX = container.clientWidth / truckC;
+  const scaleY = container.clientHeight / truckL;
+
+  truck.items.forEach(function(item, itemIndex) {
+
+    const div = document.createElement('div');
+
+    div.className = 'cargo-box';
+
+    div.dataset.truck = truckIndex;
+    div.dataset.index = itemIndex;
+
+    div.style.left = (item.x * scaleX) + 'px';
+    div.style.top = (item.y * scaleY) + 'px';
+    div.style.width = (item.w * scaleX) + 'px';
+    div.style.height = (item.h * scaleY) + 'px';
+
+    div.style.background = PALETTE[itemIndex % PALETTE.length];
+
+    if (item.rotated) {
+      div.style.borderColor = '#f5c518';
+      div.style.borderWidth = '2.5px';
+    }
+
+    div.innerHTML = '<div class="cargo-label">' + item.desc + '</div>';
+
+    enableDrag(div, truck, item, truckC, truckL);
+
+    container.appendChild(div);
+  });
+}
+
+function refreshStats() {
+
+  console.log('Estatísticas atualizadas');
 }
 
 function runOptimization() {
@@ -1191,7 +1304,7 @@ function runOptimization() {
     html += '<div class="truck-card"><div class="truck-card-header">' +
       '<div class="truck-id">Carreta <span>#' + (ti + 1) + '</span></div>' +
       '<span class="truck-util ' + utilClass + '">' + util.toFixed(1) + '%</span></div>' +
-      '<div class="truck-canvas-wrap"><canvas id="' + canvasId + '" class="truck-canvas"></canvas></div>' +
+      '<div class="truck-canvas-wrap"><div id="' + canvasId + '" class="truck-editor" data-truck="' + ti + '"></div></div>' +
       '<div class="truck-cargo-list">';
 
     for (let ii = 0; ii < truck.items.length; ii++) {
@@ -1287,8 +1400,10 @@ function runOptimization() {
 
   setTimeout(function() {
     for (let ti = 0; ti < trucks.length; ti++) {
-      const canvas = document.getElementById('canvas-' + ti);
-      if (canvas) drawTruck(canvas, trucks[ti], truckC, truckL);
+      const editor = document.getElementById('canvas-' + ti);
+      if (editor) {
+        renderTruckEditor(editor, trucks[ti], truckC, truckL, ti);
+      }
     }
   }, 100);
 }
