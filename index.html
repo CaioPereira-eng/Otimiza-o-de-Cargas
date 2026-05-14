@@ -611,8 +611,8 @@ function importRows(rows) {
   for (let i = 0; i < Math.min(5, rows.length); i++) {
     const row = rows[i];
     if (row.length >= 4) {
-      const first = (row[0] || '').toLowerCase().trim();
-      const second = (row[1] || '').toLowerCase().trim();
+      const first = String(row[0] || '').toLowerCase().trim();
+      const second = String(row[1] || '').toLowerCase().trim();
       
       if (first.includes('descricao') || first.includes('description') || first.includes('cargo') ||
           first.includes('carga') || second === 'c' || second === 'length') {
@@ -627,11 +627,11 @@ function importRows(rows) {
   for (let i = startIdx; i < rows.length; i++) {
     const row = rows[i];
     if (row.length >= 4) {
-      let desc = (row[0] || '').trim();
-      let cStr = (row[1] || '').toString().replace(',', '.');
-      let lStr = (row[2] || '').toString().replace(',', '.');
-      let pStr = (row[3] || '').toString().replace(',', '.');
-      let qtyStr = (row[4] || '1').toString();
+      let desc = String(row[0] || '').trim();
+      let cStr = String(row[1] || '').replace(',', '.');
+      let lStr = String(row[2] || '').replace(',', '.');
+      let pStr = String(row[3] || '').replace(',', '.');
+      let qtyStr = String(row[4] || '1');
       
       let c = parseFloat(cStr);
       let l = parseFloat(lStr);
