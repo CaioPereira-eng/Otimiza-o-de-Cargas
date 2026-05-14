@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CargoFit - Otimizador de Cargas</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --bg: #0d0f14;
@@ -444,8 +443,8 @@
       <div class="upload-zone" onclick="document.getElementById('file-input').click()">
         Importar planilha
       </div>
-      <input type="file" id="file-input" accept=".xlsx,.xls,.csv,.txt">
-      <div class="tip" style="margin-bottom:10px">Excel/CSV: Desc, C, L, A, P, Qtd</div>
+      <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt,.tsv">
+      <div class="tip" style="margin-bottom:10px">Excel/CSV: Desc, C, L, P, Qtd</div>
 
       <div class="cargo-header">
         <span class="h-desc">Descricao</span>
@@ -541,10 +540,11 @@ function getCargoData() {
 function loadExample() {
   clearAll();
   const ex = [
-    ['Transformer', 8.2, 3.8, 174, 1],
-    ['Cooler 1', 3.12, 2.42, 1.35, 1],
-    ['HV Casing', 7.87, 1.05, 2.55, 1],
-    ['Conservator', 4.12, 1.97, 4, 1],
+    ['W 460x82', 12, 0.46, 0.984, 26],
+    ['W 250x38,5', 12, 0.262, 0.462, 22],
+    ['W 310x44,5', 12, 0.313, 0.534, 40],
+    ['TUBO 12', 12, 0.304, 0.135, 33],
+    ['TUBO 10', 11, 0.254, 0.153, 30],
   ];
   ex.forEach(function(item) {
     addCargoRow(item[0], item[1], item[2], item[3], item[4]);
@@ -554,84 +554,70 @@ function loadExample() {
 document.getElementById('file-input').addEventListener('change', function(e) {
   const file = e.target.files[0];
   if (!file) return;
-
-  const ext = file.name.split('.').pop().toLowerCase();
-
-  if (ext === 'xlsx' || ext === 'xls') {
-    const reader = new FileReader();
-
-    reader.onload = function(ev) {
-      try {
-        const data = new Uint8Array(ev.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet, {
-          header: 1,
-          defval: ''
-        });
-
-        clearAll();
-
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i];
-          const desc = String(row[0] || '').trim();
-          const c = parseFloat(row[1]);
-          const l = parseFloat(row[2]);
-          const p = parseFloat(row[4]) || 0;
-          const qty = parseInt(row[5]) || 1;
-
-          if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
-            addCargoRow(desc.substring(0, 50), c, l, p, qty);
-          }
-        }
-
-        if (cargoRows.length === 0) {
-          alert('Nenhuma linha valida encontrada.');
-        }
-
-      } catch(err) {
-        alert('Erro ao ler Excel: ' + err.message);
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-    return;
-  }
-
   const reader = new FileReader();
-
   reader.onload = function(ev) {
     try {
       const text = ev.target.result;
       const lines = text.split(/\r?\n/).filter(function(l) { return l.trim(); });
       clearAll();
+      
+      let headerFound = false;
+      let headerIdx = -1;
+      let delimiter = '\t';
 
-      for (let i = 1; i < lines.length; i++) {
-        const parts = parseDelimitedLine(lines[i], '\t');
-
-        if (parts.length >= 5) {
-          const desc = parts[0].trim();
-          const c = parseFloat(parts[1]);
-          const l = parseFloat(parts[2]);
-          const p = parseFloat(parts[4]) || 0;
-          const qty = parseInt(parts[5]) || 1;
-
-          if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
-            addCargoRow(desc, c, l, p, qty);
+      for (let i = 0; i < Math.min(5, lines.length); i++) {
+        let parts = parseDelimitedLine(lines[i], '\t');
+        
+        if (parts.length < 4) {
+          parts = parseDelimitedLine(lines[i], ',');
+        }
+        if (parts.length < 4) {
+          parts = parseDelimitedLine(lines[i], ';');
+        }
+        
+        if (parts.length >= 4) {
+          const first = parts[0].toLowerCase().trim();
+          const second = parts[1].toLowerCase().trim();
+          
+          if (first.includes('descricao') || first.includes('description') || first.includes('cargo') ||
+              first.includes('carga') || second === 'c' || second === 'length') {
+            headerFound = true;
+            headerIdx = i;
+            
+            if (lines[i].indexOf('\t') > -1) delimiter = '\t';
+            else if (lines[i].indexOf(',') > -1) delimiter = ',';
+            else if (lines[i].indexOf(';') > -1) delimiter = ';';
+            
+            break;
           }
         }
       }
 
-      if (cargoRows.length === 0) {
-        alert('Nenhuma linha valida encontrada.');
+      const startIdx = headerFound ? headerIdx + 1 : 0;
+      for (let i = startIdx; i < lines.length; i++) {
+        const parts = parseDelimitedLine(lines[i], delimiter);
+        
+        if (parts.length >= 4) {
+          let desc = parts[0].trim();
+          let c = parseFloat(parts[1]);
+          let l = parseFloat(parts[2]);
+          let p = parseFloat(parts[3]) || 0;
+          let qty = parseInt(parts[4] || '1') || 1;
+          
+          if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+            desc = desc.replace(/[\r\n"]/g, '').substring(0, 50);
+            addCargoRow(desc, c, l, p, qty);
+          }
+        }
       }
-
-    } catch(err) {
+      
+      if (cargoRows.length === 0) {
+        alert('Nenhuma linha valida foi importada. Verifique se o arquivo tem colunas: Descricao, C, L, P, Qtd');
+      }
+    } catch (err) {
       alert('Erro ao importar: ' + err.message);
     }
   };
-
   reader.readAsText(file, 'UTF-8');
   e.target.value = '';
 });
@@ -668,7 +654,7 @@ class MaximalRectangle {
 }
 
 function pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate) {
-  const sorted = items.slice().sort(function(a, b) { return (b.c * b.l) - (a.c * a.l); });
+  const sorted = items.slice().sort(function(a, b) { return Math.max(b.c, b.l) - Math.max(a.c, a.l); });
   const trucks = [];
 
   for (let idx = 0; idx < sorted.length; idx++) {
@@ -704,60 +690,81 @@ function pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allow
 }
 
 function tryPlaceMaximal(truck, item, truckC, truckL, truckMaxW, margin, allowRotate) {
+
   if (truck.weightUsed + item.p > truckMaxW) return false;
 
-  const m = margin;
-  const variants = [[item.c, item.l]];
-  if (allowRotate && Math.abs(item.c - item.l) > 0.01) {
+  const variants = [
+    [item.c, item.l]
+  ];
+
+  if (allowRotate && Math.abs(item.c - item.l) > 0.001) {
     variants.push([item.l, item.c]);
   }
 
-  let bestRect = null, bestVariant = null, bestScore = Infinity;
+  let bestNode = null;
+  let bestRect = null;
+  let bestShortFit = Infinity;
+  let bestLongFit = Infinity;
 
-  for (let vi = 0; vi < variants.length; vi++) {
-    const w = variants[vi][0];
-    const h = variants[vi][1];
-    for (let ri = 0; ri < truck.maxRects.length; ri++) {
-      const rect = truck.maxRects[ri];
-      if (w + m * 2 <= rect.w && h + m * 2 <= rect.h) {
-        const wastedArea = (rect.w - w) * (rect.h - h);
-        if (wastedArea < bestScore) {
-          bestScore = wastedArea;
+  for (const rect of truck.maxRects) {
+
+    for (const variant of variants) {
+
+      const w = variant[0] + margin * 2;
+      const h = variant[1] + margin * 2;
+
+      if (w <= rect.w && h <= rect.h) {
+
+        const leftoverHoriz = Math.abs(rect.w - w);
+        const leftoverVert = Math.abs(rect.h - h);
+
+        const shortFit = Math.min(leftoverHoriz, leftoverVert);
+        const longFit = Math.max(leftoverHoriz, leftoverVert);
+
+        if (
+          shortFit < bestShortFit ||
+          (shortFit === bestShortFit && longFit < bestLongFit)
+        ) {
+
+          bestNode = {
+            x: rect.x,
+            y: rect.y,
+            w: variant[0],
+            h: variant[1]
+          };
+
           bestRect = rect;
-          bestVariant = [w, h];
+
+          bestShortFit = shortFit;
+          bestLongFit = longFit;
         }
       }
     }
   }
 
-  if (!bestRect || !bestVariant) return false;
+  if (!bestNode) return false;
 
-  const w = bestVariant[0];
-  const h = bestVariant[1];
-  const px = bestRect.x + m;
-  const py = bestRect.y + m;
+  splitFreeRects(truck.maxRects, bestRect, {
+    x: bestNode.x,
+    y: bestNode.y,
+    w: bestNode.w + margin * 2,
+    h: bestNode.h + margin * 2
+  });
 
-  truck.items.push({ x: px, y: py, w: w, h: h, desc: item.desc, c: item.c, l: item.l, p: item.p });
+  pruneRects(truck.maxRects);
+
+  truck.items.push({
+    x: bestNode.x + margin,
+    y: bestNode.y + margin,
+    w: bestNode.w,
+    h: bestNode.h,
+    desc: item.desc,
+    c: item.c,
+    l: item.l,
+    p: item.p
+  });
+
   truck.weightUsed += item.p;
-
-  truck.maxRects = truck.maxRects.filter(function(r) { return r !== bestRect; });
-
-  const newRects = [];
-
-  if (bestRect.x + w + m < bestRect.x + bestRect.w) {
-    newRects.push(new MaximalRectangle(bestRect.x + w + m, bestRect.y, bestRect.w - w - m, bestRect.h));
-  }
-
-  if (bestRect.y + h + m < bestRect.y + bestRect.h) {
-    newRects.push(new MaximalRectangle(bestRect.x, bestRect.y + h + m, bestRect.w, bestRect.h - h - m));
-  }
-
-  for (let i = 0; i < newRects.length; i++) {
-    truck.maxRects = truck.maxRects.filter(function(r) { return !isOccluded(r, newRects[i]); });
-    truck.maxRects.push(newRects[i]);
-  }
-
-  truck.maxRects.sort(function(a, b) { return b.area - a.area; });
 
   return true;
 }
@@ -767,6 +774,99 @@ function isOccluded(rect, newRect) {
          rect.x + rect.w <= newRect.x + newRect.w &&
          rect.y + rect.h <= newRect.y + newRect.h &&
          (rect.x !== newRect.x || rect.y !== newRect.y);
+}
+
+function splitFreeRects(freeRects, freeRect, usedRect) {
+
+  const newRects = [];
+
+  for (let i = 0; i < freeRects.length; i++) {
+
+    const rect = freeRects[i];
+
+    if (
+      usedRect.x >= rect.x + rect.w ||
+      usedRect.x + usedRect.w <= rect.x ||
+      usedRect.y >= rect.y + rect.h ||
+      usedRect.y + usedRect.h <= rect.y
+    ) {
+      continue;
+    }
+
+    if (usedRect.x > rect.x) {
+      newRects.push(new MaximalRectangle(
+        rect.x,
+        rect.y,
+        usedRect.x - rect.x,
+        rect.h
+      ));
+    }
+
+    if (usedRect.x + usedRect.w < rect.x + rect.w) {
+      newRects.push(new MaximalRectangle(
+        usedRect.x + usedRect.w,
+        rect.y,
+        rect.x + rect.w - (usedRect.x + usedRect.w),
+        rect.h
+      ));
+    }
+
+    if (usedRect.y > rect.y) {
+      newRects.push(new MaximalRectangle(
+        rect.x,
+        rect.y,
+        rect.w,
+        usedRect.y - rect.y
+      ));
+    }
+
+    if (usedRect.y + usedRect.h < rect.y + rect.h) {
+      newRects.push(new MaximalRectangle(
+        rect.x,
+        usedRect.y + usedRect.h,
+        rect.w,
+        rect.y + rect.h - (usedRect.y + usedRect.h)
+      ));
+    }
+
+    freeRects.splice(i, 1);
+    i--;
+  }
+
+  freeRects.push(...newRects);
+}
+
+function pruneRects(freeRects) {
+
+  for (let i = 0; i < freeRects.length; i++) {
+
+    for (let j = i + 1; j < freeRects.length; j++) {
+
+      const a = freeRects[i];
+      const b = freeRects[j];
+
+      if (
+        a.x >= b.x &&
+        a.y >= b.y &&
+        a.x + a.w <= b.x + b.w &&
+        a.y + a.h <= b.y + b.h
+      ) {
+        freeRects.splice(i, 1);
+        i--;
+        break;
+      }
+
+      if (
+        b.x >= a.x &&
+        b.y >= a.y &&
+        b.x + b.w <= a.x + a.w &&
+        b.y + b.h <= a.y + a.h
+      ) {
+        freeRects.splice(j, 1);
+        j--;
+      }
+    }
+  }
 }
 
 function drawTruck(canvas, truck, truckC, truckL) {
