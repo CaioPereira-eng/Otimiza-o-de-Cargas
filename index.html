@@ -436,7 +436,6 @@
   let rotatedItemsCount = 0;
   const PALETTE = ['#f5c518','#ff6b35','#3dd68c','#4f8ef7','#e040fb','#00bcd4','#ff5252','#69f0ae','#ffab40','#b388ff'];
 
-  // helpers
   function rectanglesOverlap(a,b) {
     return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
   }
@@ -480,8 +479,8 @@
         for(let i=0;i<qty;i++) {
           items.push({ 
             desc: qty>1 ? `${desc} (${i+1})` : desc, 
-            w: c,          // largura (comprimento)
-            h: l,          // altura (largura)
+            w: c,          // comprimento
+            h: l,          // largura
             p: p,
             c_orig: c,
             l_orig: l
@@ -497,68 +496,91 @@
     [[ 'Viga W460x82', 12, 0.46, 0.984, 2 ], [ 'Viga W250x38', 12, 0.262, 0.462, 3 ], [ 'TUBO 12"', 12, 0.304, 0.135, 4 ], [ 'TUBO 10"', 11, 0.254, 0.153, 3 ]].forEach(i => addCargoRow(i[0], i[1], i[2], i[3], i[4]));
   }
 
-  // ---------- IMPORTAÇÃO (colunas: C, L, A ignorado, P (t), Quant.) ----------
+  // ---------- IMPORTAÇÃO CORRIGIDA ----------
   function normalizeHeader(str) {
     return String(str || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
-  function findColumnIndex(headers, expectedPatterns) {
-    for (let i = 0; i < headers.length; i++) {
-      const h = normalizeHeader(headers[i]);
-      for (let pattern of expectedPatterns) {
-        if (h === pattern || h.includes(pattern)) return i;
-      }
+  function isNumericColumn(values) {
+    let numericCount = 0;
+    for(let i=0; i<Math.min(5, values.length); i++) {
+      if(!isNaN(parseFloat(String(values[i]).replace(',','.'))) && isFinite(values[i])) numericCount++;
     }
-    return -1;
+    return numericCount >= 3;
   }
   function importFromRows(rows) {
     clearAllCargos();
     if (!rows.length) return;
+    
     let headerRow = null;
     let dataStart = 0;
+    let columnsMapping = null; // { desc, c, l, p, qty }
+    
+    // Tenta identificar cabeçalho
     for (let i = 0; i < Math.min(5, rows.length); i++) {
       const row = rows[i];
       if (!row || row.length < 2) continue;
       const headerStr = row.map(cell => normalizeHeader(String(cell))).join(' ');
-      if (headerStr.includes('c') && (headerStr.includes('l') || headerStr.includes('larg')) && headerStr.includes('p')) {
-        headerRow = row;
-        dataStart = i+1;
-        break;
+      if (headerStr.includes('desc') || headerStr.includes('nome') || headerStr.includes('carga')) {
+        // Tenta mapear com cabeçalho
+        const headers = row.map(cell => normalizeHeader(String(cell)));
+        const idxDesc = headers.findIndex(h => h.includes('desc') || h.includes('nome') || h.includes('carga'));
+        const idxC = headers.findIndex(h => h === 'c' || h.includes('compr'));
+        const idxL = headers.findIndex(h => h === 'l' || h.includes('larg'));
+        const idxP = headers.findIndex(h => h.includes('p') || h.includes('peso'));
+        const idxQuant = headers.findIndex(h => h.includes('quant') || h.includes('qtd'));
+        if (idxC !== -1 && idxL !== -1) {
+          columnsMapping = { desc: idxDesc, c: idxC, l: idxL, p: idxP, quant: idxQuant };
+          headerRow = row;
+          dataStart = i+1;
+          break;
+        }
       }
     }
-    let idxC = -1, idxL = -1, idxP = -1, idxQuant = -1, idxDesc = -1;
-    if (headerRow) {
-      const headers = headerRow.map(cell => normalizeHeader(String(cell)));
-      idxC = findColumnIndex(headers, ['c', 'compr', 'comprimento']);
-      idxL = findColumnIndex(headers, ['l', 'larg', 'largura']);
-      idxP = findColumnIndex(headers, ['p', 'peso', 'p (t)', 'p(t)']);
-      idxQuant = findColumnIndex(headers, ['quant', 'qtd', 'quantidade', 'quant.']);
-      idxDesc = findColumnIndex(headers, ['desc', 'descricao', 'nome', 'carga', 'item']);
-    } else {
-      idxDesc = 0; idxC = 1; idxL = 2; idxP = 3; idxQuant = 4;
+    
+    // Se não encontrou cabeçalho, assume que a primeira linha são dados
+    // e a ordem é: C, L, A, P, Quant (sem descrição)
+    if (!columnsMapping) {
+      // Verifica se a primeira linha tem valores numéricos nas primeiras colunas
+      const firstRow = rows[0];
+      if (firstRow && firstRow.length >= 4 && isNumericColumn(firstRow.slice(0,4))) {
+        // Sem descrição: col0=C, col1=L, col2=A(ignorar), col3=P, col4=Quant
+        columnsMapping = { desc: -1, c: 0, l: 1, p: 3, quant: 4 };
+        dataStart = 0;
+      } else {
+        // Fallback: assume que a primeira coluna é descrição
+        columnsMapping = { desc: 0, c: 1, l: 2, p: 3, quant: 4 };
+        dataStart = 0;
+      }
     }
-    if (idxC === -1 || idxL === -1) {
-      idxC = 1; idxL = 2; if(idxP===-1) idxP=3; if(idxQuant===-1) idxQuant=4; if(idxDesc===-1) idxDesc=0;
-    }
+    
+    let cargoCounter = 1;
     for (let i = dataStart; i < rows.length; i++) {
       const row = rows[i];
       if (!row || row.length < 2) continue;
-      const desc = (idxDesc !== -1 && row[idxDesc]) ? String(row[idxDesc]).trim() : `Carga_${i}`;
-      const cRaw = idxC !== -1 ? String(row[idxC]).replace(',', '.') : '0';
-      const lRaw = idxL !== -1 ? String(row[idxL]).replace(',', '.') : '0';
-      const pRaw = (idxP !== -1 && row[idxP]) ? String(row[idxP]).replace(',', '.') : '0';
+      
+      let desc = '';
+      if (columnsMapping.desc !== -1 && row[columnsMapping.desc]) {
+        desc = String(row[columnsMapping.desc]).trim();
+      }
+      if (!desc) desc = `Carga ${cargoCounter++}`;
+      
+      const cRaw = columnsMapping.c !== -1 ? String(row[columnsMapping.c]).replace(',', '.') : '0';
+      const lRaw = columnsMapping.l !== -1 ? String(row[columnsMapping.l]).replace(',', '.') : '0';
+      const pRaw = (columnsMapping.p !== -1 && row[columnsMapping.p]) ? String(row[columnsMapping.p]).replace(',', '.') : '0';
       let qty = 1;
-      if (idxQuant !== -1 && row[idxQuant]) {
-        qty = parseInt(String(row[idxQuant]).replace(/\./g,'')) || 1;
+      if (columnsMapping.quant !== -1 && row[columnsMapping.quant]) {
+        qty = parseInt(String(row[columnsMapping.quant]).replace(/\./g,'')) || 1;
         if (isNaN(qty) || qty < 1) qty = 1;
       }
+      
       const c = parseFloat(cRaw);
       const l = parseFloat(lRaw);
       const p = parseFloat(pRaw) || 0;
-      if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0 && desc) {
+      if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
         addCargoRow(desc.substring(0, 50), c, l, p, qty);
       }
     }
-    if (cargoRows.length === 0) alert('Nenhuma carga válida importada. Verifique as colunas: C, L, P (t), Quant.');
+    if (cargoRows.length === 0) alert('Nenhuma carga válida importada. Verifique as colunas: C, L, P (t), Quant. (descrição opcional)');
   }
 
   document.getElementById('file-input').addEventListener('change', e => {
@@ -581,7 +603,7 @@
     e.target.value = '';
   });
 
-  // -------------------- MAXIMAL RECTANGLES PACKER (CORRIGIDO) --------------------
+  // -------------------- MAXIMAL RECTANGLES PACKER --------------------
   class MaximalRectangle { constructor(x,y,w,h) { this.x=x; this.y=y; this.w=w; this.h=h; } }
   
   function splitFreeRects(freeRects, usedRect) {
@@ -669,14 +691,14 @@
         if(tryPlaceMaximal(newTruck, item, truckC, truckL, maxW, margin, allowRotate)) {
           trucks.push(newTruck);
         } else {
-          unplaced.push({ ...item }); // mantém w/h originais
+          unplaced.push({ ...item });
         }
       }
     }
     return { trucks, unplaced };
   }
 
-  // -------------------- VALIDAÇÕES --------------------
+  // -------------------- VALIDAÇÕES E DRAG & DROP --------------------
   function validateTruck(truck, truckC, truckL) {
     const errors=[];
     for(let i=0;i<truck.items.length;i++) {
@@ -686,13 +708,12 @@
     }
     return errors;
   }
-
-  // -------------------- DRAG & DROP GLOBAL (com suporte a não alocados) --------------------
+  
   function enableDrag(element, item, sourceTruck) {
     element.addEventListener('mousedown', e => {
       e.preventDefault();
       if(CURRENT_DRAG) return;
-      CURRENT_DRAG = { item, sourceTruck, startX:e.clientX, startY:e.clientY };
+      CURRENT_DRAG = { item, sourceTruck };
       element.classList.add('dragging');
       const ghost = element.cloneNode(true);
       ghost.style.position='fixed'; ghost.style.zIndex='99999'; ghost.style.pointerEvents='none'; ghost.style.opacity='0.8';
@@ -773,7 +794,8 @@
     return {
       truckC: parseFloat(document.getElementById('truck-c').value)||14,
       truckL: parseFloat(document.getElementById('truck-l').value)||2.6,
-      truckMaxW: parseFloat(document.getElementById('truck-w').value)||30
+      truckMaxW: parseFloat(document.getElementById('truck-w').value)||30,
+      margin: parseFloat(document.getElementById('truck-margin').value)||0
     };
   }
   function updateWeights() { GLOBAL_TRUCKS.forEach(t => t.weightUsed = t.items.reduce((s,i)=>s+(i.p||0),0)); }
@@ -876,7 +898,7 @@
     console.log(`Otimização concluída. Rotações: ${rotatedItemsCount}`);
   }
   
-  // inicialização com exemplo
+  // inicialização
   loadExample();
   setTimeout(() => runOptimization(), 100);
 </script>
