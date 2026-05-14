@@ -483,6 +483,10 @@
 <script>
 const PALETTE = ['#f5c518','#ff6b35','#3dd68c','#4f8ef7','#e040fb','#00bcd4','#ff5252','#69f0ae','#ffab40','#b388ff','#80deea','#f48fb1','#a5d6a7','#fff176','#90caf9','#ffcc80','#ef9a9a','#80cbc4','#ce93d8','#ffe082'];
 
+const DEBUG = true;
+let preventedCollisions = 0;
+let rotatedItemsCount = 0;
+
 let cargoRows = [];
 let rowId = 0;
 
@@ -710,6 +714,24 @@ function parseDelimitedLine(line, delimiter) {
   return result;
 }
 
+function intersects(a, b) {
+  return !(
+    a.x >= b.x + b.w ||
+    a.x + a.w <= b.x ||
+    a.y >= b.y + b.h ||
+    a.y + a.h <= b.y
+  );
+}
+
+function rectanglesOverlap(a, b) {
+  return !(
+    a.x + a.w <= b.x ||
+    b.x + b.w <= a.x ||
+    a.y + a.h <= b.y ||
+    b.y + b.h <= a.y
+  );
+}
+
 class MaximalRectangle {
   constructor(x, y, w, h) {
     if (w <= 0 || h <= 0 || isNaN(w) || isNaN(h)) {
@@ -814,7 +836,7 @@ function tryPlaceMaximal(truck, item, truckC, truckL, truckMaxW, margin, allowRo
 
   if (!bestNode) return false;
 
-  splitFreeRects(truck.maxRects, bestRect, {
+  splitFreeRects(truck.maxRects, {
     x: bestNode.x,
     y: bestNode.y,
     w: bestNode.w + margin * 2,
@@ -822,6 +844,42 @@ function tryPlaceMaximal(truck, item, truckC, truckL, truckMaxW, margin, allowRo
   });
 
   pruneRects(truck.maxRects);
+
+  const newItemRect = {
+    x: bestNode.x + margin,
+    y: bestNode.y + margin,
+    w: bestNode.w,
+    h: bestNode.h
+  };
+
+  for (const existing of truck.items) {
+
+    if (rectanglesOverlap(existing, newItemRect)) {
+
+      preventedCollisions++;
+
+      if (DEBUG) {
+        console.warn('COLISAO EVITADA', existing, newItemRect);
+      }
+
+      return false;
+
+    }
+  }
+
+  if (
+    newItemRect.x < 0 ||
+    newItemRect.y < 0 ||
+    newItemRect.x + newItemRect.w > truckC ||
+    newItemRect.y + newItemRect.h > truckL
+  ) {
+
+    if (DEBUG) {
+      console.warn('ITEM FORA DOS LIMITES', newItemRect);
+    }
+
+    return false;
+  }
 
   truck.items.push({
     x: bestNode.x + margin,
@@ -831,10 +889,35 @@ function tryPlaceMaximal(truck, item, truckC, truckL, truckMaxW, margin, allowRo
     desc: item.desc,
     c: item.c,
     l: item.l,
-    p: item.p
+    p: item.p,
+    rotated: (
+      Math.abs(bestNode.w - item.c) > 0.001 ||
+      Math.abs(bestNode.h - item.l) > 0.001
+    )
   });
 
+  if (truck.items[truck.items.length - 1].rotated) {
+    rotatedItemsCount++;
+  }
+
   truck.weightUsed += item.p;
+
+  if (DEBUG) {
+
+    console.log('ITEM POSICIONADO', {
+      item: item.desc,
+      x: bestNode.x,
+      y: bestNode.y,
+      w: bestNode.w,
+      h: bestNode.h,
+      rotated: (
+        Math.abs(bestNode.w - item.c) > 0.001 ||
+        Math.abs(bestNode.h - item.l) > 0.001
+      )
+    });
+
+    console.log('FREE RECTS', truck.maxRects);
+  }
 
   return true;
 }
@@ -846,90 +929,110 @@ function isOccluded(rect, newRect) {
          (rect.x !== newRect.x || rect.y !== newRect.y);
 }
 
-function splitFreeRects(freeRects, freeRect, usedRect) {
+function splitFreeRects(freeRects, usedRect) {
 
-  const newRects = [];
+  for (let i = freeRects.length - 1; i >= 0; i--) {
 
-  // Only split the specific freeRect, not all intersecting ones
-  const rect = freeRect;
+    const rect = freeRects[i];
 
-  if (
-    usedRect.x >= rect.x + rect.w ||
-    usedRect.x + usedRect.w <= rect.x ||
-    usedRect.y >= rect.y + rect.h ||
-    usedRect.y + usedRect.h <= rect.y
-  ) {
-    // No intersection, do nothing
-    return;
-  }
+    if (!intersects(rect, usedRect)) continue;
 
-  if (usedRect.x > rect.x) {
-    const w = usedRect.x - rect.x;
-    if (w > 0) {
-      newRects.push(new MaximalRectangle(
-        rect.x,
-        rect.y,
-        w,
-        rect.h
-      ));
+    freeRects.splice(i, 1);
+
+    // LEFT
+    if (usedRect.x > rect.x) {
+
+      const w = usedRect.x - rect.x;
+
+      if (w > 0.0001) {
+        freeRects.push(
+          new MaximalRectangle(
+            rect.x,
+            rect.y,
+            w,
+            rect.h
+          )
+        );
+      }
     }
-  }
 
-  if (usedRect.x + usedRect.w < rect.x + rect.w) {
-    const w = rect.x + rect.w - (usedRect.x + usedRect.w);
-    if (w > 0) {
-      newRects.push(new MaximalRectangle(
-        usedRect.x + usedRect.w,
-        rect.y,
-        w,
-        rect.h
-      ));
+    // RIGHT
+    if (usedRect.x + usedRect.w < rect.x + rect.w) {
+
+      const w = rect.x + rect.w - (usedRect.x + usedRect.w);
+
+      if (w > 0.0001) {
+        freeRects.push(
+          new MaximalRectangle(
+            usedRect.x + usedRect.w,
+            rect.y,
+            w,
+            rect.h
+          )
+        );
+      }
     }
-  }
 
-  if (usedRect.y > rect.y) {
-    const h = usedRect.y - rect.y;
-    if (h > 0) {
-      newRects.push(new MaximalRectangle(
-        rect.x,
-        rect.y,
-        rect.w,
-        h
-      ));
+    // TOP
+    if (usedRect.y > rect.y) {
+
+      const h = usedRect.y - rect.y;
+
+      if (h > 0.0001) {
+        freeRects.push(
+          new MaximalRectangle(
+            rect.x,
+            rect.y,
+            rect.w,
+            h
+          )
+        );
+      }
     }
-  }
 
-  if (usedRect.y + usedRect.h < rect.y + rect.h) {
-    const h = rect.y + rect.h - (usedRect.y + usedRect.h);
-    if (h > 0) {
-      newRects.push(new MaximalRectangle(
-        rect.x,
-        usedRect.y + usedRect.h,
-        rect.w,
-        h
-      ));
+    // BOTTOM
+    if (usedRect.y + usedRect.h < rect.y + rect.h) {
+
+      const h = rect.y + rect.h - (usedRect.y + usedRect.h);
+
+      if (h > 0.0001) {
+        freeRects.push(
+          new MaximalRectangle(
+            rect.x,
+            usedRect.y + usedRect.h,
+            rect.w,
+            h
+          )
+        );
+      }
     }
-  }
 
-  // Remove the original freeRect
-  const index = freeRects.indexOf(freeRect);
-  if (index > -1) {
-    freeRects.splice(index, 1);
   }
-
-  // Add new rectangles
-  freeRects.push(...newRects);
 }
 
 function pruneRects(freeRects) {
 
-  for (let i = 0; i < freeRects.length; i++) {
+  for (let i = freeRects.length - 1; i >= 0; i--) {
 
-    for (let j = i + 1; j < freeRects.length; j++) {
+    const a = freeRects[i];
 
-      const a = freeRects[i];
+    if (
+      a.w <= 0.0001 ||
+      a.h <= 0.0001 ||
+      isNaN(a.w) ||
+      isNaN(a.h)
+    ) {
+      freeRects.splice(i, 1);
+      continue;
+    }
+
+    for (let j = freeRects.length - 1; j >= 0; j--) {
+
+      if (i === j) continue;
+
       const b = freeRects[j];
 
+      // remove contained
       if (
         a.x >= b.x &&
         a.y >= b.y &&
@@ -937,21 +1040,54 @@ function pruneRects(freeRects) {
         a.y + a.h <= b.y + b.h
       ) {
         freeRects.splice(i, 1);
-        i--;
         break;
       }
 
+      // remove duplicates
       if (
-        b.x >= a.x &&
-        b.y >= a.y &&
-        b.x + b.w <= a.x + a.w &&
-        b.y + b.h <= a.y + a.h
+        Math.abs(a.x - b.x) < 0.0001 &&
+        Math.abs(a.y - b.y) < 0.0001 &&
+        Math.abs(a.w - b.w) < 0.0001 &&
+        Math.abs(a.h - b.h) < 0.0001
       ) {
         freeRects.splice(j, 1);
-        j--;
       }
     }
+
   }
+}
+
+function validateTruck(truck, truckC, truckL) {
+
+  const errors = [];
+
+  for (let i = 0; i < truck.items.length; i++) {
+
+    const a = truck.items[i];
+
+    if (
+      a.x < 0 ||
+      a.y < 0 ||
+      a.x + a.w > truckC ||
+      a.y + a.h > truckL
+    ) {
+      errors.push('Item fora da carreta: ' + a.desc);
+    }
+
+    for (let j = i + 1; j < truck.items.length; j++) {
+
+      const b = truck.items[j];
+
+      if (rectanglesOverlap(a, b)) {
+        errors.push(
+          'Overlap entre ' + a.desc + ' e ' + b.desc
+        );
+      }
+    }
+
+  }
+
+  return errors;
 }
 
 function drawTruck(canvas, truck, truckC, truckL) {
@@ -996,7 +1132,10 @@ function drawTruck(canvas, truck, truckC, truckL) {
     ctx.fillRect(x, y, w, h);
 
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = '#0d0f14';
+    ctx.strokeStyle =
+      item.rotated
+        ? '#f5c518'
+        : '#0d0f14';
     ctx.lineWidth = 1.5;
     ctx.strokeRect(x, y, w, h);
 
@@ -1073,6 +1212,77 @@ function runOptimization() {
   }
 
   html += '</div>';
+
+  const validationErrors = [];
+
+  for (let i = 0; i < trucks.length; i++) {
+
+    const errs = validateTruck(
+      trucks[i],
+      truckC,
+      truckL
+    );
+
+    validationErrors.push(...errs);
+  }
+
+  html += `
+
+  <div style="
+    margin-top:24px;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:18px;
+  ">
+    <div style="
+      font-family:'Bebas Neue';
+      color:var(--accent);
+      font-size:20px;
+      letter-spacing:2px;
+      margin-bottom:14px;
+    ">
+      LOG DE OTIMIZACAO
+    </div>
+
+    <div style="
+      font-family:'DM Mono';
+      font-size:12px;
+      line-height:1.8;
+      color:var(--text);
+    ">
+
+      <div>Total de cargas: ${items.length}</div>
+      <div>Total de carretas: ${trucks.length}</div>
+      <div>Ocupacao media: ${avgUtil.toFixed(2)}%</div>
+      <div>Rotacoes realizadas: ${rotatedItemsCount}</div>
+      <div>Colisoes evitadas: ${preventedCollisions}</div>
+      <div>Erros encontrados: ${validationErrors.length}</div>
+
+      ${
+        validationErrors.length
+          ? `
+          <div style="
+            color:#ff4d6d;
+            margin-top:10px;
+          ">
+            ${validationErrors.join('<br>')}
+          </div>
+          `
+          : `
+          <div style="
+            color:#3dd68c;
+            margin-top:10px;
+          ">
+            Nenhum overlap detectado
+          </div>
+          `
+      }
+
+    </div>
+  </div>
+  `;
+
   panel.innerHTML = html;
 
   setTimeout(function() {
