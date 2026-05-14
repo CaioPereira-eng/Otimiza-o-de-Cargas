@@ -604,49 +604,88 @@ function importRows(rows) {
     alert('Nenhuma linha valida foi importada.');
     return;
   }
-  
+
+  function normalizeCell(value) {
+    return String(value || '').trim();
+  }
+
+  function normalizeHeader(value) {
+    return normalizeCell(value).toLowerCase();
+  }
+
   let headerFound = false;
   let headerIdx = -1;
-  
+  let colMap = {
+    desc: 0,
+    c: 1,
+    l: 2,
+    p: 3,
+    qty: 4
+  };
+
   for (let i = 0; i < Math.min(5, rows.length); i++) {
     const row = rows[i];
-    if (row.length >= 4) {
-      const first = String(row[0] || '').toLowerCase().trim();
-      const second = String(row[1] || '').toLowerCase().trim();
-      
-      if (first.includes('descricao') || first.includes('description') || first.includes('cargo') ||
-          first.includes('carga') || second === 'c' || second === 'length') {
-        headerFound = true;
-        headerIdx = i;
-        break;
+    if (!Array.isArray(row) || row.length < 4) continue;
+
+    const headers = row.map(normalizeHeader);
+    let score = 0;
+    const candidateMap = { desc: null, c: null, l: null, p: null, qty: null };
+
+    for (let j = 0; j < headers.length; j++) {
+      const value = headers[j];
+      if (!value) continue;
+      if (value.includes('nome') || value.includes('descricao') || value.includes('description') || value.includes('cargo') || value.includes('carga')) {
+        candidateMap.desc = j; score += 2;
+      } else if (value.includes('compr') || value === 'c' || value === 'comprimento') {
+        candidateMap.c = j; score += 2;
+      } else if (value.includes('larg') || value === 'l' || value === 'largura') {
+        candidateMap.l = j; score += 2;
+      } else if (value.includes('peso')) {
+        candidateMap.p = j; score += 2;
+      } else if (value.includes('quant') || value.includes('qtd')) {
+        candidateMap.qty = j; score += 2;
+      } else if (value.includes('altura') || value === 'h' || value === 'height') {
+        // ignore altitude if present
       }
     }
+
+    if (candidateMap.desc !== null && candidateMap.c !== null && candidateMap.l !== null) {
+      headerFound = true;
+      headerIdx = i;
+      colMap = {
+        desc: candidateMap.desc,
+        c: candidateMap.c,
+        l: candidateMap.l,
+        p: candidateMap.p !== null ? candidateMap.p : 4,
+        qty: candidateMap.qty !== null ? candidateMap.qty : 5
+      };
+      break;
+    }
   }
-  
+
   const startIdx = headerFound ? headerIdx + 1 : 0;
   for (let i = startIdx; i < rows.length; i++) {
     const row = rows[i];
-    if (row.length >= 4) {
-      let desc = String(row[0] || '').trim();
-      let cStr = String(row[1] || '').replace(',', '.');
-      let lStr = String(row[2] || '').replace(',', '.');
-      let pStr = String(row[3] || '').replace(',', '.');
-      let qtyStr = String(row[4] || '1');
-      
-      let c = parseFloat(cStr);
-      let l = parseFloat(lStr);
-      let p = parseFloat(pStr) || 0;
-      let qty = parseInt(qtyStr) || 1;
-      
-      if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
-        desc = desc.replace(/[\r\n"]/g, '').substring(0, 50);
-        addCargoRow(desc, c, l, p, qty);
-      }
+    if (!Array.isArray(row) || row.length < 3) continue;
+
+    const desc = normalizeCell(row[colMap.desc]);
+    const cStr = normalizeCell(row[colMap.c]).replace(',', '.');
+    const lStr = normalizeCell(row[colMap.l]).replace(',', '.');
+    const pStr = normalizeCell(row[colMap.p] || '').replace(',', '.');
+    const qtyStr = normalizeCell(row[colMap.qty] || '1');
+
+    const c = parseFloat(cStr);
+    const l = parseFloat(lStr);
+    const p = parseFloat(pStr) || 0;
+    const qty = parseInt(qtyStr, 10) || 1;
+
+    if (desc && !isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+      addCargoRow(desc.replace(/[\r\n"]/g, '').substring(0, 50), c, l, p, qty);
     }
   }
-  
+
   if (cargoRows.length === 0) {
-    alert('Nenhuma linha valida foi importada. Verifique se o arquivo tem colunas: Descricao, C, L, P, Qtd');
+    alert('Nenhuma linha valida foi importada. Verifique se o arquivo tem colunas: Nome/Descricao, Comprimento, Largura, Peso, Quantidade');
   }
 }
 
