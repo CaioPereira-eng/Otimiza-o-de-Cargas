@@ -506,7 +506,79 @@
     [[ 'Viga W460x82', 12, 0.46, 0.984, 2 ], [ 'Viga W250x38', 12, 0.262, 0.462, 3 ], [ 'TUBO 12"', 12, 0.304, 0.135, 4 ], [ 'TUBO 10"', 11, 0.254, 0.153, 3 ]].forEach(i => addCargoRow(i[0], i[1], i[2], i[3], i[4]));
   }
 
-  // importação
+  // ---------- IMPORTAÇÃO CORRIGIDA para colunas: C, L, A (ignorado), P (t), Quant. ----------
+  function normalizeHeader(str) {
+    return String(str || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+  function findColumnIndex(headers, expectedPatterns) {
+    for (let i = 0; i < headers.length; i++) {
+      const h = normalizeHeader(headers[i]);
+      for (let pattern of expectedPatterns) {
+        if (h === pattern || h.includes(pattern)) return i;
+      }
+    }
+    return -1;
+  }
+  function importFromRows(rows) {
+    clearAllCargos();
+    if (!rows.length) return;
+    // primeira linha não vazia como cabeçalho?
+    let headerRow = null;
+    let dataStart = 0;
+    for (let i = 0; i < Math.min(5, rows.length); i++) {
+      const row = rows[i];
+      if (!row || row.length < 2) continue;
+      const headerStr = row.map(cell => normalizeHeader(String(cell))).join(' ');
+      if (headerStr.includes('c') && (headerStr.includes('l') || headerStr.includes('larg')) && headerStr.includes('p')) {
+        headerRow = row;
+        dataStart = i+1;
+        break;
+      }
+    }
+    if (!headerRow) {
+      // assume que primeira linha é dados
+      headerRow = null;
+      dataStart = 0;
+    }
+    // mapeamento exato: "c", "l", "p (t)", "quant"
+    let idxC = -1, idxL = -1, idxP = -1, idxQuant = -1, idxDesc = -1;
+    if (headerRow) {
+      const headers = headerRow.map(cell => normalizeHeader(String(cell)));
+      idxC = findColumnIndex(headers, ['c', 'compr', 'comprimento']);
+      idxL = findColumnIndex(headers, ['l', 'larg', 'largura']);
+      idxP = findColumnIndex(headers, ['p', 'peso', 'p (t)', 'p(t)']);
+      idxQuant = findColumnIndex(headers, ['quant', 'qtd', 'quantidade', 'quant.']);
+      idxDesc = findColumnIndex(headers, ['desc', 'descricao', 'nome', 'carga', 'item']);
+    } else {
+      // fallback: ordem padrão: col0=desc, col1=C, col2=L, col3=P, col4=Quant
+      idxDesc = 0; idxC = 1; idxL = 2; idxP = 3; idxQuant = 4;
+    }
+    // se não achou algum essencial, tenta ordem padrão
+    if (idxC === -1 || idxL === -1) {
+      idxC = 1; idxL = 2; if(idxP===-1) idxP=3; if(idxQuant===-1) idxQuant=4; if(idxDesc===-1) idxDesc=0;
+    }
+    for (let i = dataStart; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 2) continue;
+      const desc = (idxDesc !== -1 && row[idxDesc]) ? String(row[idxDesc]).trim() : `Carga_${i}`;
+      const cRaw = idxC !== -1 ? String(row[idxC]).replace(',', '.') : '0';
+      const lRaw = idxL !== -1 ? String(row[idxL]).replace(',', '.') : '0';
+      const pRaw = (idxP !== -1 && row[idxP]) ? String(row[idxP]).replace(',', '.') : '0';
+      let qty = 1;
+      if (idxQuant !== -1 && row[idxQuant]) {
+        qty = parseInt(String(row[idxQuant]).replace(/\./g,'')) || 1;
+        if (isNaN(qty) || qty < 1) qty = 1;
+      }
+      const c = parseFloat(cRaw);
+      const l = parseFloat(lRaw);
+      const p = parseFloat(pRaw) || 0;
+      if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0 && desc) {
+        addCargoRow(desc.substring(0, 50), c, l, p, qty);
+      }
+    }
+    if (cargoRows.length === 0) alert('Nenhuma carga válida importada. Verifique se as colunas estão nomeadas como: C, L, P (t), Quant. (descrição opcional).');
+  }
+
   document.getElementById('file-input').addEventListener('change', e => {
     const file = e.target.files[0]; if(!file) return;
     const reader = new FileReader();
@@ -515,23 +587,12 @@
       if(file.name.match(/\.xlsx?$/)) {
         const wb = XLSX.read(ev.target.result, { type: 'array' });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
       } else {
         const text = ev.target.result;
-        rows = text.split(/\r?\n/).filter(l=>l.trim()).map(l=> l.split(/,|\t|;/));
+        rows = text.split(/\r?\n/).filter(l=>l.trim()).map(l=> l.split(/,|\t|;/).map(cell=>cell.trim()));
       }
-      clearAllCargos();
-      for(let r of rows) {
-        if(r.length>=3) {
-          const desc = String(r[0]||'').trim();
-          const c = parseFloat(String(r[1]).replace(',','.'));
-          const l = parseFloat(String(r[2]).replace(',','.'));
-          const p = r[3] ? parseFloat(String(r[3]).replace(',','.')) : 0;
-          const qty = r[4] ? parseInt(r[4]) : 1;
-          if(desc && !isNaN(c) && c>0 && !isNaN(l) && l>0) addCargoRow(desc, c, l, p, qty);
-        }
-      }
-      if(cargoRows.length===0) alert('Nenhuma carga válida importada. Use colunas: Descrição, Comprimento, Largura, Peso, Quantidade');
+      importFromRows(rows);
     };
     if(file.name.match(/\.xlsx?$/)) reader.readAsArrayBuffer(file);
     else reader.readAsText(file, 'UTF-8');
@@ -783,9 +844,6 @@
     UNPLACED_ITEMS = unplaced;
     updateWeights();
     rerenderResults();
-    // additional log debug
-    const totalErrors = GLOBAL_TRUCKS.reduce((acc,t)=>acc+validateTruck(t, truckC, truckL).length,0);
-    console.log(`Otimização finalizada. Rotations: ${rotatedItemsCount}, Colisões evitadas: ${preventedCollisions}, Overlaps atuais: ${totalErrors}`);
   }
   // exemplo inicial
   loadExample();
