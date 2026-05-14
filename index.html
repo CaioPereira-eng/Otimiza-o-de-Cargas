@@ -440,6 +440,82 @@
     text-align: center;
     pointer-events: none;
   }
+
+  .truck-editor.drop-hover {
+    outline: 3px solid var(--accent);
+  }
+
+  .unplaced-section {
+    margin-top: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px;
+  }
+
+  .unplaced-title {
+    font-family: 'Bebas Neue';
+    font-size: 20px;
+    color: var(--danger);
+    letter-spacing: 2px;
+    margin-bottom: 14px;
+  }
+
+  #unplaced-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-height: 80px;
+  }
+
+  .unplaced-box {
+    padding: 10px 14px;
+    background: rgba(255,77,109,0.15);
+    border: 1px solid var(--danger);
+    border-radius: 4px;
+    font-family: 'DM Mono';
+    font-size: 11px;
+    cursor: grab;
+  }
+
+  .btn {
+    padding: 6px 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text);
+    font-family: 'DM Mono';
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn:hover {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.4);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+  }
+
+  .btn-primary:hover {
+    background: #5dd7ff;
+    border-color: #5dd7ff;
+  }
+
+  .btn-danger {
+    background: rgba(255,77,109,0.2);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  .btn-danger:hover {
+    background: rgba(255,77,109,0.35);
+    border-color: #ff6b85;
+  }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -529,6 +605,10 @@ const PALETTE = ['#f5c518','#ff6b35','#3dd68c','#4f8ef7','#e040fb','#00bcd4','#f
 const DEBUG = true;
 let preventedCollisions = 0;
 let rotatedItemsCount = 0;
+
+let GLOBAL_TRUCKS = [];
+let UNPLACED_ITEMS = [];
+let CURRENT_DRAG = null;
 
 let cargoRows = [];
 let rowId = 0;
@@ -791,6 +871,7 @@ class MaximalRectangle {
 function pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate) {
   const sorted = items.slice().sort(function(a, b) { return (b.c * b.l) - (a.c * a.l); });
   const trucks = [];
+  const unplaced = [];
 
   for (let idx = 0; idx < sorted.length; idx++) {
     const item = sorted[idx];
@@ -812,14 +893,17 @@ function pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allow
       if (tryPlaceMaximal(newTruck, item, truckC, truckL, truckMaxW, margin, allowRotate)) {
         trucks.push(newTruck);
       } else {
-        trucks.push({
-          maxRects: [],
-          items: [{x: 0, y: 0, w: item.c, h: item.l, desc: item.desc, c: item.c, l: item.l, p: item.p, oversized: true}],
-          weightUsed: item.p
+
+        unplaced.push({
+          ...item,
+          failed: true
         });
+
       }
     }
   }
+
+  UNPLACED_ITEMS = unplaced;
 
   return trucks;
 }
@@ -1133,95 +1217,330 @@ function validateTruck(truck, truckC, truckL) {
   return errors;
 }
 
-function updateCargoVisual(el, item, truckC, truckL) {
+/* =========================================================
+   NOVO DRAG & DROP GLOBAL - V2
+   ========================================================= */
 
-  const parent = el.parentElement;
+let CURRENT_DRAG = null;
 
-  const scaleX = parent.clientWidth / truckC;
-  const scaleY = parent.clientHeight / truckL;
+/* =========================================================
+   UTILIDADES
+   ========================================================= */
 
-  el.style.left = (item.x * scaleX) + 'px';
-  el.style.top = (item.y * scaleY) + 'px';
+function getTruckDimensions() {
+  return {
+    truckC: parseFloat(document.getElementById('truck-c').value) || 14,
+    truckL: parseFloat(document.getElementById('truck-l').value) || 2.6,
+    truckMaxW: parseFloat(document.getElementById('truck-w').value) || 30
+  };
 }
 
-function validateTruckVisual(truck, currentEl, currentItem) {
+function calculateTruckWeight(truck) {
+  return truck.items.reduce((s, i) => s + (i.p || 0), 0);
+}
 
-  let invalid = false;
+function rectanglesOverlap(a, b) {
+  return !(
+    a.x + a.w <= b.x ||
+    b.x + b.w <= a.x ||
+    a.y + a.h <= b.y ||
+    b.y + b.h <= a.y
+  );
+}
 
-  for (const other of truck.items) {
+function validatePosition(item, targetTruck) {
 
-    if (other === currentItem) continue;
+  const { truckC, truckL, truckMaxW } = getTruckDimensions();
 
-    if (rectanglesOverlap(currentItem, other)) {
-      invalid = true;
-      break;
+  if (item.x < 0) return false;
+  if (item.y < 0) return false;
+  if (item.x + item.w > truckC) return false;
+  if (item.y + item.h > truckL) return false;
+
+  let totalWeight = item.p || 0;
+
+  for (const other of targetTruck.items) {
+
+    if (other === item) continue;
+
+    totalWeight += other.p || 0;
+
+    if (rectanglesOverlap(item, other)) {
+      return false;
     }
   }
 
-  if (invalid) {
-    currentEl.classList.add('invalid');
-  } else {
-    currentEl.classList.remove('invalid');
+  if (totalWeight > truckMaxW) {
+    return false;
   }
+
+  return true;
 }
 
-function enableDrag(el, truck, item, truckC, truckL) {
+function updateTruckWeights() {
 
-  let startX = 0;
-  let startY = 0;
+  GLOBAL_TRUCKS.forEach(truck => {
+    truck.weightUsed = calculateTruckWeight(truck);
+  });
+}
 
-  el.addEventListener('mousedown', startDrag);
+/* =========================================================
+   SNAP AUTOMATICO
+   ========================================================= */
+
+function findBestPosition(item, truck) {
+
+  const { truckC, truckL } = getTruckDimensions();
+
+  const step = 0.05;
+
+  for (let y = 0; y <= truckL - item.h; y += step) {
+
+    for (let x = 0; x <= truckC - item.w; x += step) {
+
+      item.x = x;
+      item.y = y;
+
+      if (validatePosition(item, truck)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/* =========================================================
+   ADICIONAR CARRETA
+   ========================================================= */
+
+function addTruck() {
+
+  GLOBAL_TRUCKS.push({
+    items: [],
+    weightUsed: 0
+  });
+
+  rerenderResults();
+}
+
+/* =========================================================
+   REMOVER CARRETA
+   ========================================================= */
+
+function removeTruck(index) {
+
+  const truck = GLOBAL_TRUCKS[index];
+
+  if (truck.items.length > 0) {
+
+    UNPLACED_ITEMS.push(...truck.items);
+  }
+
+  GLOBAL_TRUCKS.splice(index, 1);
+
+  rerenderResults();
+}
+
+/* =========================================================
+   ROTACIONAR ITEM
+   ========================================================= */
+
+function rotateItem(item) {
+
+  const temp = item.w;
+  item.w = item.h;
+  item.h = temp;
+
+  item.rotated = !item.rotated;
+}
+
+/* =========================================================
+   HIGHLIGHT
+   ========================================================= */
+
+function clearDropHighlights() {
+
+  document.querySelectorAll('.truck-editor').forEach(el => {
+    el.classList.remove('drop-hover');
+  });
+}
+
+function highlightDropZones(mouseX, mouseY) {
+
+  clearDropHighlights();
+
+  document.querySelectorAll('.truck-editor').forEach(zone => {
+
+    const r = zone.getBoundingClientRect();
+
+    const inside =
+      mouseX >= r.left &&
+      mouseX <= r.right &&
+      mouseY >= r.top &&
+      mouseY <= r.bottom;
+
+    if (inside) {
+      zone.classList.add('drop-hover');
+    }
+  });
+}
+
+/* =========================================================
+   DRAG GLOBAL
+   ========================================================= */
+
+function enableGlobalDrag(element, item, sourceTruck) {
+
+  element.addEventListener('mousedown', startDrag);
 
   function startDrag(e) {
 
     e.preventDefault();
 
-    el.classList.add('dragging');
+    CURRENT_DRAG = {
+      item,
+      sourceTruck,
+      originalX: item.x,
+      originalY: item.y
+    };
 
-    startX = e.clientX;
-    startY = e.clientY;
+    element.classList.add('dragging');
 
-    document.addEventListener('mousemove', drag);
-    document.addEventListener('mouseup', stopDrag);
-  }
+    const ghost = element.cloneNode(true);
 
-  function drag(e) {
+    ghost.style.position = 'fixed';
+    ghost.style.zIndex = '999999';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.opacity = '0.9';
 
-    const editor = el.parentElement;
+    document.body.appendChild(ghost);
 
-    const scaleX = truckC / editor.clientWidth;
-    const scaleY = truckL / editor.clientHeight;
+    moveGhost(e);
 
-    const dx = (e.clientX - startX) * scaleX;
-    const dy = (e.clientY - startY) * scaleY;
+    function moveGhost(ev) {
 
-    startX = e.clientX;
-    startY = e.clientY;
+      ghost.style.left =
+        (ev.clientX - element.offsetWidth / 2) + 'px';
 
-    item.x += dx;
-    item.y += dy;
+      ghost.style.top =
+        (ev.clientY - element.offsetHeight / 2) + 'px';
 
-    item.x = Math.max(0, Math.min(truckC - item.w, item.x));
-    item.y = Math.max(0, Math.min(truckL - item.h, item.y));
+      highlightDropZones(ev.clientX, ev.clientY);
+    }
 
-    item.x = Math.round(item.x * 20) / 20;
-    item.y = Math.round(item.y * 20) / 20;
+    function onMove(ev) {
+      moveGhost(ev);
+    }
 
-    updateCargoVisual(el, item, truckC, truckL);
+    function onUp(ev) {
 
-    validateTruckVisual(truck, el, item);
-  }
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
 
-  function stopDrag() {
+      ghost.remove();
 
-    el.classList.remove('dragging');
+      element.classList.remove('dragging');
 
-    document.removeEventListener('mousemove', drag);
-    document.removeEventListener('mouseup', stopDrag);
+      clearDropHighlights();
 
-    refreshStats();
+      handleDrop(ev);
+
+      CURRENT_DRAG = null;
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 }
+
+/* =========================================================
+   DROP
+   ========================================================= */
+
+function handleDrop(e) {
+
+  if (!CURRENT_DRAG) return;
+
+  const item = CURRENT_DRAG.item;
+
+  let targetTruck = null;
+  let targetZone = null;
+
+  document.querySelectorAll('.truck-editor').forEach(zone => {
+
+    const r = zone.getBoundingClientRect();
+
+    const inside =
+      e.clientX >= r.left &&
+      e.clientX <= r.right &&
+      e.clientY >= r.top &&
+      e.clientY <= r.bottom;
+
+    if (inside) {
+
+      targetZone = zone;
+
+      const idx = parseInt(zone.dataset.truck);
+
+      targetTruck = GLOBAL_TRUCKS[idx];
+    }
+  });
+
+  if (!targetTruck) {
+
+    rerenderResults();
+    return;
+  }
+
+  if (CURRENT_DRAG.sourceTruck) {
+
+    CURRENT_DRAG.sourceTruck.items =
+      CURRENT_DRAG.sourceTruck.items.filter(i => i !== item);
+
+  } else {
+
+    UNPLACED_ITEMS =
+      UNPLACED_ITEMS.filter(i => i !== item);
+  }
+
+  const rect = targetZone.getBoundingClientRect();
+
+  const { truckC, truckL } = getTruckDimensions();
+
+  const scaleX = rect.width / truckC;
+  const scaleY = rect.height / truckL;
+
+  item.x = (e.clientX - rect.left) / scaleX - item.w / 2;
+  item.y = (e.clientY - rect.top) / scaleY - item.h / 2;
+
+  targetTruck.items.push(item);
+
+  if (!validatePosition(item, targetTruck)) {
+
+    const success = findBestPosition(item, targetTruck);
+
+    if (!success) {
+
+      targetTruck.items =
+        targetTruck.items.filter(i => i !== item);
+
+      UNPLACED_ITEMS.push(item);
+
+      rerenderResults();
+
+      return;
+    }
+  }
+
+  updateTruckWeights();
+
+  rerenderResults();
+}
+
+/* =========================================================
+   RENDER VISUAL DAS CARGAS
+   ========================================================= */
 
 function renderTruckEditor(container, truck, truckC, truckL, truckIndex) {
 
@@ -1230,38 +1549,241 @@ function renderTruckEditor(container, truck, truckC, truckL, truckIndex) {
   const scaleX = container.clientWidth / truckC;
   const scaleY = container.clientHeight / truckL;
 
-  truck.items.forEach(function(item, itemIndex) {
+  truck.items.forEach((item, idx) => {
 
     const div = document.createElement('div');
 
     div.className = 'cargo-box';
 
-    div.dataset.truck = truckIndex;
-    div.dataset.index = itemIndex;
-
     div.style.left = (item.x * scaleX) + 'px';
     div.style.top = (item.y * scaleY) + 'px';
+
     div.style.width = (item.w * scaleX) + 'px';
     div.style.height = (item.h * scaleY) + 'px';
 
-    div.style.background = PALETTE[itemIndex % PALETTE.length];
+    div.style.background =
+      PALETTE[idx % PALETTE.length];
 
-    if (item.rotated) {
-      div.style.borderColor = '#f5c518';
-      div.style.borderWidth = '2.5px';
-    }
+    div.innerHTML = `
+      <div class="cargo-label">
+        ${item.desc}
+      </div>
+    `;
 
-    div.innerHTML = '<div class="cargo-label">' + item.desc + '</div>';
+    const rotateBtn = document.createElement('button');
 
-    enableDrag(div, truck, item, truckC, truckL);
+    rotateBtn.innerHTML = '↻';
+
+    rotateBtn.style.position = 'absolute';
+    rotateBtn.style.top = '2px';
+    rotateBtn.style.right = '2px';
+    rotateBtn.style.zIndex = '50';
+    rotateBtn.style.fontSize = '10px';
+    rotateBtn.style.padding = '2px 4px';
+    rotateBtn.style.cursor = 'pointer';
+    rotateBtn.style.background = 'rgba(0,0,0,0.3)';
+    rotateBtn.style.border = '1px solid rgba(255,255,255,0.3)';
+    rotateBtn.style.color = 'white';
+    rotateBtn.style.borderRadius = '2px';
+
+    rotateBtn.addEventListener('click', function(ev) {
+
+      ev.stopPropagation();
+
+      rotateItem(item);
+
+      if (!validatePosition(item, truck)) {
+
+        rotateItem(item);
+
+        alert('Nao ha espaco para rotacionar.');
+      }
+
+      rerenderResults();
+    });
+
+    div.appendChild(rotateBtn);
+
+    enableGlobalDrag(div, item, truck);
 
     container.appendChild(div);
   });
 }
 
-function refreshStats() {
+/* =========================================================
+   RENDER CARGAS NAO ALOCADAS
+   ========================================================= */
 
-  console.log('Estatísticas atualizadas');
+function renderUnplacedItems() {
+
+  const container =
+    document.getElementById('unplaced-items');
+
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  UNPLACED_ITEMS.forEach((item, idx) => {
+
+    const div = document.createElement('div');
+
+    div.className = 'unplaced-box';
+
+    div.innerHTML = `
+      <strong>${item.desc}</strong><br>
+      ${item.w.toFixed(2)}m x ${item.h.toFixed(2)}m
+      ${item.p ? '<br>' + item.p + 't' : ''}
+    `;
+
+    enableGlobalDrag(div, item, null);
+
+    container.appendChild(div);
+  });
+}
+
+/* =========================================================
+   RENDER GERAL
+   ========================================================= */
+
+function renderAllEditors() {
+
+  const { truckC, truckL } = getTruckDimensions();
+
+  GLOBAL_TRUCKS.forEach((truck, index) => {
+
+    const canvas =
+      document.getElementById('canvas-' + index);
+
+    if (!canvas) return;
+
+    renderTruckEditor(
+      canvas,
+      truck,
+      truckC,
+      truckL,
+      index
+    );
+  });
+
+  renderUnplacedItems();
+}
+
+/* =========================================================
+   RERENDER COMPLETO
+   ========================================================= */
+
+function rerenderResults() {
+
+  runOptimizationVisualOnly();
+}
+
+/* =========================================================
+   RENDER SEM RECALCULAR OTIMIZACAO
+   ========================================================= */
+
+function runOptimizationVisualOnly() {
+
+  const panel =
+    document.getElementById('results-panel');
+
+  const { truckC, truckL, truckMaxW } =
+    getTruckDimensions();
+
+  let html = `
+    <div class="stats-bar">
+
+      <div class="stat-card warn">
+        <div class="val">${GLOBAL_TRUCKS.length}</div>
+        <div class="lbl">Carretas</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="val">${UNPLACED_ITEMS.length}</div>
+        <div class="lbl">Nao Alocadas</div>
+      </div>
+
+      <button
+        class="btn btn-primary"
+        onclick="addTruck()"
+        style="margin-left:auto"
+      >
+        + CARRETA
+      </button>
+
+    </div>
+
+    <div class="trucks-grid">
+  `;
+
+  GLOBAL_TRUCKS.forEach((truck, ti) => {
+
+    const usedArea =
+      truck.items.reduce((s, i) => s + (i.w * i.h), 0);
+
+    const util =
+      usedArea / (truckC * truckL) * 100;
+
+    html += `
+      <div class="truck-card">
+
+        <div class="truck-card-header">
+
+          <div class="truck-id">
+            Carreta <span>#${ti + 1}</span>
+          </div>
+
+          <span class="truck-util high">
+            ${util.toFixed(1)}%
+          </span>
+
+          <button
+            class="btn btn-danger"
+            onclick="removeTruck(${ti})"
+            style="
+              padding:4px 8px;
+              font-size:10px;
+              margin-left:auto;
+            "
+          >
+            ×
+          </button>
+
+        </div>
+
+        <div class="truck-canvas-wrap">
+
+          <div
+            id="canvas-${ti}"
+            class="truck-editor"
+            data-truck="${ti}"
+          ></div>
+
+        </div>
+
+      </div>
+    `;
+  });
+
+  html += `
+    </div>
+
+    <div class="unplaced-section">
+
+      <div class="unplaced-title">
+        CARGAS NAO ALOCADAS
+        (${UNPLACED_ITEMS.length})
+      </div>
+
+      <div id="unplaced-items"></div>
+
+    </div>
+  `;
+
+  panel.innerHTML = html;
+
+  setTimeout(() => {
+    renderAllEditors();
+  }, 50);
 }
 
 function runOptimization() {
@@ -1279,19 +1801,22 @@ function runOptimization() {
 
   const trucks = pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate);
 
+  GLOBAL_TRUCKS = trucks;
+
   const panel = document.getElementById('results-panel');
   const totalItems = items.length;
   const utilizations = trucks.map(function(t) {
     const used = t.items.reduce(function(s, i) { return s + i.w * i.h; }, 0);
     return used / (truckC * truckL) * 100;
   });
-  const avgUtil = utilizations.reduce(function(a, b) { return a + b; }, 0) / utilizations.length;
+  const avgUtil = utilizations.length > 0 ? utilizations.reduce(function(a, b) { return a + b; }, 0) / utilizations.length : 0;
 
   let html = '<div class="stats-bar">' +
     '<div class="stat-card warn"><div class="val">' + trucks.length + '</div><div class="lbl">Carretas</div></div>' +
-    '<div class="stat-card"><div class="val">' + totalItems + '</div><div class="lbl">Pecas</div></div>' +
+    '<div class="stat-card"><div class="val">' + (totalItems) + '</div><div class="lbl">Pecas</div></div>' +
     '<div class="stat-card ' + (avgUtil >= 75 ? 'good' : avgUtil >= 50 ? '' : 'warn') + '"><div class="val">' + avgUtil.toFixed(0) + '%</div><div class="lbl">Ocupacao</div></div>' +
     '<div class="stat-card"><div class="val">' + truckC + 'x' + truckL + '</div><div class="lbl">Dimensao</div></div>' +
+    '<button class="btn btn-primary" onclick="addTruck()" style="margin-left:auto">+ CARRETA</button>' +
     '</div><div class="trucks-grid">';
 
   for (let ti = 0; ti < trucks.length; ti++) {
@@ -1303,7 +1828,8 @@ function runOptimization() {
 
     html += '<div class="truck-card"><div class="truck-card-header">' +
       '<div class="truck-id">Carreta <span>#' + (ti + 1) + '</span></div>' +
-      '<span class="truck-util ' + utilClass + '">' + util.toFixed(1) + '%</span></div>' +
+      '<span class="truck-util ' + utilClass + '">' + util.toFixed(1) + '%</span>' +
+      '<button class="btn btn-danger" style="padding:4px 8px;font-size:10px;margin-left:auto" onclick="removeTruck(' + ti + ')">×</button></div>' +
       '<div class="truck-canvas-wrap"><div id="' + canvasId + '" class="truck-editor" data-truck="' + ti + '"></div></div>' +
       '<div class="truck-cargo-list">';
 
@@ -1325,6 +1851,19 @@ function runOptimization() {
   }
 
   html += '</div>';
+
+  html += `
+
+  <div class="unplaced-section">
+
+    <div class="unplaced-title">
+      CARGAS NAO ALOCADAS
+    </div>
+
+    <div id="unplaced-items"></div>
+
+  </div>
+  `;
 
   const validationErrors = [];
 
@@ -1399,13 +1938,107 @@ function runOptimization() {
   panel.innerHTML = html;
 
   setTimeout(function() {
-    for (let ti = 0; ti < trucks.length; ti++) {
-      const editor = document.getElementById('canvas-' + ti);
-      if (editor) {
-        renderTruckEditor(editor, trucks[ti], truckC, truckL, ti);
-      }
-    }
+    renderAllEditors();
   }, 100);
+}
+
+function rerenderResults() {
+
+  const panel = document.getElementById('results-panel');
+  const truckC = parseFloat(document.getElementById('truck-c').value) || 14;
+  const truckL = parseFloat(document.getElementById('truck-l').value) || 2.6;
+  const truckMaxW = parseFloat(document.getElementById('truck-w').value) || 30;
+
+  const trucks = GLOBAL_TRUCKS;
+
+  const totalItems = trucks.reduce(function(sum, t) { return sum + t.items.length; }, 0);
+  const utilizations = trucks.map(function(t) {
+    const used = t.items.reduce(function(s, i) { return s + i.w * i.h; }, 0);
+    return used / (truckC * truckL) * 100;
+  });
+  const avgUtil = utilizations.length > 0 ? utilizations.reduce(function(a, b) { return a + b; }, 0) / utilizations.length : 0;
+
+  let html = '<div class="stats-bar">' +
+    '<div class="stat-card warn"><div class="val">' + trucks.length + '</div><div class="lbl">Carretas</div></div>' +
+    '<div class="stat-card"><div class="val">' + (totalItems + UNPLACED_ITEMS.length) + '</div><div class="lbl">Pecas</div></div>' +
+    '<div class="stat-card ' + (avgUtil >= 75 ? 'good' : avgUtil >= 50 ? '' : 'warn') + '"><div class="val">' + avgUtil.toFixed(0) + '%</div><div class="lbl">Ocupacao</div></div>' +
+    '<div class="stat-card"><div class="val">' + truckC + 'x' + truckL + '</div><div class="lbl">Dimensao</div></div>' +
+    '<button class="btn btn-primary" onclick="addTruck()" style="margin-left:auto">+ CARRETA</button>' +
+    '</div><div class="trucks-grid">';
+
+  for (let ti = 0; ti < trucks.length; ti++) {
+    const truck = trucks[ti];
+    const used = truck.items.reduce(function(s, i) { return s + i.w * i.h; }, 0);
+    const util = trucks.length > 0 ? used / (truckC * truckL) * 100 : 0;
+    const utilClass = util >= 75 ? 'high' : util >= 50 ? 'mid' : 'low';
+    const canvasId = 'canvas-' + ti;
+
+    html += '<div class="truck-card"><div class="truck-card-header">' +
+      '<div class="truck-id">Carreta <span>#' + (ti + 1) + '</span></div>' +
+      '<span class="truck-util ' + utilClass + '">' + util.toFixed(1) + '%</span>' +
+      '<button class="btn btn-danger" style="padding:4px 8px;font-size:10px;margin-left:auto" onclick="removeTruck(' + ti + ')">×</button></div>' +
+      '<div class="truck-canvas-wrap"><div id="' + canvasId + '" class="truck-editor" data-truck="' + ti + '"></div></div>' +
+      '<div class="truck-cargo-list">';
+
+    for (let ii = 0; ii < truck.items.length; ii++) {
+      const item = truck.items[ii];
+      const color = PALETTE[ii % PALETTE.length];
+      const weightDisplay = item.p > 0 ? '<div class="ci-dim" style="margin-left:6px">' + item.p + 't</div>' : '';
+      html += '<div class="cargo-item-row">' +
+        '<div class="dot" style="background:' + color + '"></div>' +
+        '<div class="ci-name">' + item.desc + '</div>' +
+        '<div class="ci-dim">' + item.w.toFixed(2) + 'm x ' + item.h.toFixed(2) + 'm</div>' +
+        weightDisplay + '</div>';
+    }
+
+    const wUtil = truckMaxW > 0 ? (truck.weightUsed / truckMaxW * 100).toFixed(0) : '-';
+    html += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">' +
+      '<span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text-muted)">Area: ' + util.toFixed(1) + '% | Peso: ' + truck.weightUsed.toFixed(2) + 't (' + wUtil + '%)</span>' +
+      '</div></div></div>';
+  }
+
+  html += '</div>';
+
+  html += `
+
+  <div class="unplaced-section">
+
+    <div class="unplaced-title">
+      CARGAS NAO ALOCADAS (${UNPLACED_ITEMS.length})
+    </div>
+
+    <div id="unplaced-items"></div>
+
+  </div>
+  `;
+
+  panel.innerHTML = html;
+
+  renderAllEditors();
+}
+
+function addTruck() {
+
+  GLOBAL_TRUCKS.push({
+    maxRects: [],
+    items: [],
+    weightUsed: 0
+  });
+
+  rerenderResults();
+}
+
+function removeTruck(index) {
+
+  const truck = GLOBAL_TRUCKS[index];
+
+  if (truck && truck.items.length > 0) {
+    UNPLACED_ITEMS.push(...truck.items);
+  }
+
+  GLOBAL_TRUCKS.splice(index, 1);
+
+  rerenderResults();
 }
 
 loadExample();
