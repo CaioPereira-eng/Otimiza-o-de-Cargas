@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Otimizador de Cargas — Carretas</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f14;
+    --surface: #14171f;
+    --surface2: #1c2030;
+    --border: #272c3d;
+    --accent: #f5c518;
+    --accent2: #ff6b35;
+    --text: #e8eaf0;
+    --text-muted: #5a6080;
+    --truck-bg: #1a2035;
+    --truck-border: #2a3555;
+    --success: #3dd68c;
+    --danger: #ff4d6d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--surface);
+    border-bottom: 2px solid var(--accent);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  header .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    line-height: 1;
+  }
+  header .subtitle {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  header .badge {
+    margin-left: auto;
+    background: var(--accent);
+    color: #000;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* LAYOUT */
+  .app {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    height: calc(100vh - 64px);
+  }
+
+  /* LEFT PANEL */
+  .panel-left {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-section {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-section h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 14px;
+    text-transform: uppercase;
+  }
+
+  /* TRUCK CONFIG */
+  .truck-config {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .field-group label {
+    display: block;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+  }
+  .field-group input, .field-group select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field-group input:focus, .field-group select:focus {
+    border-color: var(--accent);
+  }
+  .field-group.full { grid-column: 1/-1; }
+
+  /* CARGO TABLE */
+  .cargo-section {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 24px;
+  }
+  .cargo-section h3 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .cargo-header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 0 0 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .cargo-header span {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .cargo-header .h-desc { flex: 2; }
+  .cargo-header .h-num { flex: 1; text-align: center; }
+
+  .cargo-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .cargo-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .cargo-row input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .cargo-row input:focus { border-color: var(--accent); }
+  .cargo-row input.inp-desc { flex: 2; }
+  .cargo-row input.inp-num { flex: 1; text-align: center; }
+  .cargo-row .btn-del {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    font-size: 16px;
+    line-height: 1;
+    transition: color 0.2s;
+  }
+  .cargo-row .btn-del:hover { color: var(--danger); }
+
+  .cargo-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  /* BUTTONS */
+  .btn {
+    padding: 9px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    font-weight: 600;
+  }
+  .btn-primary:hover { background: #ffd740; transform: translateY(-1px); }
+  .btn-run {
+    width: 100%;
+    padding: 14px;
+    font-size: 14px;
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 3px;
+    font-weight: 400;
+  }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #ff6b85; }
+
+  /* RIGHT PANEL */
+  .panel-right {
+    overflow-y: auto;
+    padding: 24px 28px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* SUMMARY STATS */
+  .stats-bar {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 18px;
+    flex: 1;
+    text-align: center;
+  }
+  .stat-card .val {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 32px;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-card .lbl {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+  .stat-card.good .val { color: var(--success); }
+  .stat-card.warn .val { color: var(--accent2); }
+
+  /* TRUCK VISUALIZATION */
+  .trucks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+  }
+  .truck-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .truck-card-header {
+    background: var(--surface2);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  .truck-card-header .truck-id {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: var(--text);
+  }
+  .truck-card-header .truck-id span { color: var(--accent); }
+  .truck-util {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+  .truck-util.high { background: rgba(61,214,140,0.15); color: var(--success); }
+  .truck-util.mid { background: rgba(245,197,24,0.15); color: var(--accent); }
+  .truck-util.low { background: rgba(255,75,109,0.15); color: var(--danger); }
+
+  .truck-canvas-wrap {
+    padding: 14px;
+  }
+  canvas.truck-canvas {
+    display: block;
+    width: 100%;
+    border-radius: 3px;
+    background: var(--truck-bg);
+  }
+
+  .truck-cargo-list {
+    padding: 0 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cargo-item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+  .cargo-item-row .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .cargo-item-row .ci-name {
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cargo-item-row .ci-dim {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* EMPTY STATE */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60%;
+    gap: 12px;
+    color: var(--text-muted);
+  }
+  .empty-state .icon { font-size: 48px; opacity: 0.3; }
+  .empty-state p { font-family: 'DM Mono', monospace; font-size: 12px; text-align: center; letter-spacing: 0.5px; }
+
+  /* UPLOAD */
+  .upload-zone {
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .upload-zone:hover { border-color: var(--accent); color: var(--accent); background: rgba(245,197,24,0.04); }
+  #file-input { display: none; }
+
+  /* TOOLTIP */
+  .tip {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: var(--bg);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 3px 3px 0;
+  }
+
+  .rotate-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .rotate-toggle input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
+  .rotate-toggle label { font-size: 12px; color: var(--text-muted); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">🚛 CargoFit</div>
+    <div class="subtitle">Otimizador de Posicionamento de Cargas</div>
+  </div>
+  <div class="badge">Maximal Rectangles</div>
+</header>
+
+<div class="app">
+
+  <!-- LEFT PANEL -->
+  <div class="panel-left">
+
+    <!-- TRUCK CONFIG -->
+    <div class="panel-section">
+      <h3>Configuração da Carreta</h3>
+      <div class="truck-config">
+        <div class="field-group">
+          <label>Comprimento (m)</label>
+          <input type="number" id="truck-c" value="14" step="0.1" min="1">
+        </div>
+        <div class="field-group">
+          <label>Largura (m)</label>
+          <input type="number" id="truck-l" value="2.6" step="0.1" min="0.5">
+        </div>
+        <div class="field-group">
+          <label>Peso Máx. (t)</label>
+          <input type="number" id="truck-w" value="30" step="0.5" min="1">
+        </div>
+        <div class="field-group">
+          <label>Margem (m)</label>
+          <input type="number" id="truck-margin" value="0.1" step="0.05" min="0">
+        </div>
+      </div>
+      <div class="rotate-toggle">
+        <input type="checkbox" id="allow-rotate" checked>
+        <label for="allow-rotate">Permitir rotação de 90° das cargas</label>
+      </div>
+      <div class="tip">Padrão: carreta sider/baú 14m × 2,6m, 30t</div>
+    </div>
+
+    <!-- CARGO INPUT -->
+    <div class="cargo-section">
+      <h3>Lista de Cargas</h3>
+
+      <!-- CSV UPLOAD -->
+      <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+        📂 importar CSV / planilha
+      </div>
+      <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt">
+      <div class="tip" style="margin-bottom:10px">CSV: Descrição, C (m), L (m), P (t), Qtd</div>
+
+      <div class="cargo-header">
+        <span class="h-desc">Descrição</span>
+        <span class="h-num">C (m)</span>
+        <span class="h-num">L (m)</span>
+        <span class="h-num">P (t)</span>
+        <span class="h-num">Qtd</span>
+        <span style="width:24px"></span>
+      </div>
+
+      <div class="cargo-list" id="cargo-list"></div>
+
+      <div class="cargo-actions">
+        <button class="btn btn-ghost" onclick="addCargoRow()">+ Adicionar</button>
+        <button class="btn btn-ghost" onclick="clearAll()">Limpar</button>
+        <button class="btn btn-ghost" onclick="loadExample()">Exemplo</button>
+      </div>
+
+      <div style="margin-top:14px">
+        <button class="btn btn-primary btn-run" onclick="runOptimization()">▶ Otimizar Carregamento</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel-right" id="results-panel">
+    <div class="empty-state">
+      <div class="icon">🚛</div>
+      <p>Configure as cargas e clique em<br>Otimizar Carregamento</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── COLORS ─────────────────────────────────��─────────────────────────────────
+const PALETTE = [
+  '#f5c518','#ff6b35','#3dd68c','#4f8ef7','#e040fb',
+  '#00bcd4','#ff5252','#69f0ae','#ffab40','#b388ff',
+  '#80deea','#f48fb1','#a5d6a7','#fff176','#90caf9',
+  '#ffcc80','#ef9a9a','#80cbc4','#ce93d8','#ffe082',
+];
+
+let cargoRows = [];
+let rowId = 0;
+
+// ─── CARGO ROW UI ──────────────────────────────────────────────────────────────
+function addCargoRow(desc='', c='', l='', p='', qty='1') {
+  const id = rowId++;
+  cargoRows.push(id);
+  const list = document.getElementById('cargo-list');
+  const div = document.createElement('div');
+  div.className = 'cargo-row';
+  div.id = `row-${id}`;
+  div.innerHTML = `
+    <input class="inp-desc" type="text" placeholder="Descrição" value="${desc}" data-field="desc">
+    <input class="inp-num" type="number" placeholder="C" value="${c}" step="0.01" min="0" data-field="c">
+    <input class="inp-num" type="number" placeholder="L" value="${l}" step="0.01" min="0" data-field="l">
+    <input class="inp-num" type="number" placeholder="P" value="${p}" step="0.01" min="0" data-field="p">
+    <input class="inp-num" type="number" placeholder="Qtd" value="${qty}" step="1" min="1" data-field="qty">
+    <button class="btn-del" onclick="removeRow(${id})">×</button>
+  `;
+  list.appendChild(div);
+}
+
+function removeRow(id) {
+  document.getElementById(`row-${id}`)?.remove();
+  cargoRows = cargoRows.filter(r => r !== id);
+}
+
+function clearAll() {
+  document.getElementById('cargo-list').innerHTML = '';
+  cargoRows = [];
+  rowId = 0;
+}
+
+function getCargoData() {
+  const items = [];
+  document.querySelectorAll('.cargo-row').forEach(row => {
+    const desc = row.querySelector('[data-field="desc"]').value.trim() || 'Carga';
+    const c = parseFloat(row.querySelector('[data-field="c"]').value);
+    const l = parseFloat(row.querySelector('[data-field="l"]').value);
+    const p = parseFloat(row.querySelector('[data-field="p"]').value) || 0;
+    const qty = parseInt(row.querySelector('[data-field="qty"]').value) || 1;
+    if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+      for (let i = 0; i < qty; i++) {
+        items.push({ desc: qty > 1 ? \`\${desc} (#\${i+1})\` : desc, c, l, p, orig: desc });
+      }
+    }
+  });
+  return items;
+}
+
+// ─── EXAMPLE DATA ─────────────────────────────────────────────────────────────
+function loadExample() {
+  clearAll();
+  const ex = [
+    ['W 460x82', 12, 0.46, 0.984, 26],
+    ['W 250x38,5', 12, 0.262, 0.462, 22],
+    ['W 310x44,5', 12, 0.313, 0.534, 40],
+    ['TUBO 12"', 12, 0.304, 0.135, 33],
+    ['TUBO 10"', 11, 0.254, 0.153, 30],
+  ];
+  ex.forEach(([d, c, l, p, q]) => addCargoRow(d, c, l, p, q));
+}
+
+// ─── FILE IMPORT (Enhanced CSV/Excel Parser) ──────────────────────────────────
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const text = ev.target.result;
+      const lines = text.split('\n').filter(l => l.trim());
+      clearAll();
+      
+      let headerFound = false;
+      let headerIdx = -1;
+
+      // Auto-detect header row (contains "Descrição" or "Description" or starts with text)
+      for (let i = 0; i < Math.min(5, lines.length); i++) {
+        const parts = parseCSVLine(lines[i]);
+        if (parts.length >= 4 && 
+            (parts[0].toLowerCase().includes('descrição') || 
+             parts[0].toLowerCase().includes('description') || 
+             parts[0].toLowerCase().includes('cargo') ||
+             (isNaN(parseFloat(parts[1])) && parts[1].toLowerCase().includes('c')))) {
+          headerFound = true;
+          headerIdx = i;
+          break;
+        }
+      }
+
+      // Parse data rows (skip header if found)
+      const startIdx = headerFound ? headerIdx + 1 : 0;
+      for (let i = startIdx; i < lines.length; i++) {
+        const parts = parseCSVLine(lines[i]);
+        if (parts.length >= 4) {
+          const desc = parts[0]?.trim() || 'Carga';
+          const c = parseFloat(parts[1]);
+          const l = parseFloat(parts[2]);
+          const p = parseFloat(parts[3]) || 0;
+          const qty = parseInt(parts[4] || '1') || 1;
+          
+          // Validate numeric fields
+          if (!isNaN(c) && c > 0 && !isNaN(l) && l > 0) {
+            addCargoRow(desc, c, l, p, qty);
+          }
+        }
+      }
+      
+      if (cargoRows.length === 0) {
+        alert('Nenhuma linha válida foi importada. Verifique o formato do arquivo.');
+      }
+    } catch (err) {
+      alert('Erro ao importar arquivo: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// Parse CSV line (handles quoted values)
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let insideQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if ((char === ',' || char === ';') && !insideQuotes) {
+      result.push(current.trim().replace(/"/g, ''));
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim().replace(/"/g, ''));
+  return result;
+}
+
+// ─── MAXIMAL RECTANGLES ALGORITHM (State-of-the-art 2D bin packing) ─────────────
+class MaximalRectangle {
+  constructor(x, y, w, h) {
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+    this.area = w * h;
+  }
+}
+
+function pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate) {
+  const sorted = [...items].sort((a, b) => (b.c * b.l) - (a.c * a.l));
+  const trucks = [];
+
+  for (const item of sorted) {
+    let placed = false;
+
+    // Try to place in existing truck
+    for (const truck of trucks) {
+      if (tryPlaceMaximal(truck, item, truckC, truckL, truckMaxW, margin, allowRotate)) {
+        placed = true;
+        break;
+      }
+    }
+
+    // If not placed, create new truck
+    if (!placed) {
+      const newTruck = {
+        maxRects: [new MaximalRectangle(0, 0, truckC, truckL)],
+        items: [],
+        weightUsed: 0
+      };
+      if (tryPlaceMaximal(newTruck, item, truckC, truckL, truckMaxW, margin, allowRotate)) {
+        trucks.push(newTruck);
+      } else {
+        // Item too big — mark as oversized
+        trucks.push({
+          maxRects: [],
+          items: [{ ...item, x: 0, y: 0, w: item.c, h: item.l, oversized: true }],
+          weightUsed: item.p
+        });
+      }
+    }
+  }
+
+  return trucks;
+}
+
+function tryPlaceMaximal(truck, item, truckC, truckL, truckMaxW, margin, allowRotate) {
+  if (truck.weightUsed + item.p > truckMaxW) return false;
+
+  const m = margin;
+  const variants = [[item.c, item.l]];
+  if (allowRotate && Math.abs(item.c - item.l) > 0.01) {
+    variants.push([item.l, item.c]);
+  }
+
+  let bestRect = null, bestVariant = null, bestScore = Infinity;
+
+  // Find best fitting rectangle
+  for (const [w, h] of variants) {
+    for (const rect of truck.maxRects) {
+      if (w + m * 2 <= rect.w && h + m * 2 <= rect.h) {
+        // Score: prefer tighter fit (smallest waste area)
+        const wastedArea = (rect.w - w) * (rect.h - h);
+        if (wastedArea < bestScore) {
+          bestScore = wastedArea;
+          bestRect = rect;
+          bestVariant = [w, h];
+        }
+      }
+    }
+  }
+
+  if (!bestRect || !bestVariant) return false;
+
+  const [w, h] = bestVariant;
+  const px = bestRect.x + m;
+  const py = bestRect.y + m;
+
+  // Add item
+  truck.items.push({ ...item, x: px, y: py, w, h });
+  truck.weightUsed += item.p;
+
+  // Update maximal rectangles
+  truck.maxRects = truck.maxRects.filter(r => r !== bestRect);
+
+  // Generate new maximal rectangles
+  const newRects = [];
+
+  // Right side
+  if (bestRect.x + w + m < bestRect.x + bestRect.w) {
+    newRects.push(new MaximalRectangle(
+      bestRect.x + w + m,
+      bestRect.y,
+      bestRect.w - w - m,
+      bestRect.h
+    ));
+  }
+
+  // Top side
+  if (bestRect.y + h + m < bestRect.y + bestRect.h) {
+    newRects.push(new MaximalRectangle(
+      bestRect.x,
+      bestRect.y + h + m,
+      bestRect.w,
+      bestRect.h - h - m
+    ));
+  }
+
+  // Add new rects and remove occluded ones
+  for (const newRect of newRects) {
+    truck.maxRects = truck.maxRects.filter(r => !isOccluded(r, newRect));
+    truck.maxRects.push(newRect);
+  }
+
+  // Sort by area descending for next iterations
+  truck.maxRects.sort((a, b) => b.area - a.area);
+
+  return true;
+}
+
+function isOccluded(rect, newRect) {
+  return rect.x >= newRect.x && rect.y >= newRect.y &&
+         rect.x + rect.w <= newRect.x + newRect.w &&
+         rect.y + rect.h <= newRect.y + newRect.h &&
+         (rect.x !== newRect.x || rect.y !== newRect.y);
+}
+
+// ─── DRAW TRUCK ────────────────────────────────────────────────────────────────
+function drawTruck(canvas, truck, truckC, truckL) {
+  const scale = Math.min((canvas.offsetWidth * 2) / truckC, 160 / truckL);
+  canvas.width = Math.round(truckC * scale);
+  canvas.height = Math.round(truckL * scale);
+  canvas.style.height = (canvas.height / 2) + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background grid
+  ctx.fillStyle = '#10162a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  const grid = 1 * scale;
+  for (let x = 0; x <= canvas.width; x += grid) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= canvas.height; y += grid) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  // Truck border
+  ctx.strokeStyle = '#2a3a6a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+
+  // Items
+  truck.items.forEach((item, i) => {
+    const color = PALETTE[i % PALETTE.length];
+    const x = item.x * scale, y = item.y * scale;
+    const w = item.w * scale, h = item.h * scale;
+
+    // Fill
+    ctx.globalAlpha = 0.82;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, w, h);
+
+    // Border
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#0d0f14';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x, y, w, h);
+
+    // Label
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.font = \`bold \${Math.max(9, Math.min(13, w / 5))}px 'DM Mono', monospace\`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = \`\${item.w.toFixed(1)}×\${item.h.toFixed(1)}\`;
+    if (w > 28 && h > 14) {
+      ctx.fillText(label, x + w / 2, y + h / 2);
+    }
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ─── RUN OPTIMIZATION ─────────────────────────────────────────────────────────
+function runOptimization() {
+  const items = getCargoData();
+  if (items.length === 0) {
+    alert('Adicione ao menos uma carga válida (C e L obrigatórios).');
+    return;
+  }
+
+  const truckC = parseFloat(document.getElementById('truck-c').value) || 14;
+  const truckL = parseFloat(document.getElementById('truck-l').value) || 2.6;
+  const truckMaxW = parseFloat(document.getElementById('truck-w').value) || 30;
+  const margin = parseFloat(document.getElementById('truck-margin').value) || 0;
+  const allowRotate = document.getElementById('allow-rotate').checked;
+
+  const trucks = pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate);
+
+  // ── RENDER ──
+  const panel = document.getElementById('results-panel');
+  const totalItems = items.length;
+  const utilizations = trucks.map(t => {
+    const used = t.items.reduce((s, i) => s + i.w * i.h, 0);
+    return used / (truckC * truckL) * 100;
+  });
+  const avgUtil = utilizations.reduce((a, b) => a + b, 0) / utilizations.length;
+  const totalWeight = trucks.reduce((s, t) => s + t.weightUsed, 0);
+
+  let html = \`
+    <div class="stats-bar">
+      <div class="stat-card warn">
+        <div class="val">\${trucks.length}</div>
+        <div class="lbl">Carretas Necessárias</div>
+      </div>
+      <div class="stat-card">
+        <div class="val">\${totalItems}</div>
+        <div class="lbl">Peças Totais</div>
+      </div>
+      <div class="stat-card \${avgUtil >= 75 ? 'good' : avgUtil >= 50 ? '' : 'warn'}">
+        <div class="val">\${avgUtil.toFixed(0)}%</div>
+        <div class="lbl">Ocupação Média</div>
+      </div>
+      <div class="stat-card">
+        <div class="val">\${truckC}×\${truckL}</div>
+        <div class="lbl">Dimensão (m)</div>
+      </div>
+    </div>
+    <div class="trucks-grid">
+  \`;
+
+  trucks.forEach((truck, ti) => {
+    const used = truck.items.reduce((s, i) => s + i.w * i.h, 0);
+    const util = used / (truckC * truckL) * 100;
+    const utilClass = util >= 75 ? 'high' : util >= 50 ? 'mid' : 'low';
+    const canvasId = \`canvas-\${ti}\`;
+
+    html += \`
+      <div class="truck-card">
+        <div class="truck-card-header">
+          <div class="truck-id">Carreta <span>#\${ti + 1}</span></div>
+          <span class="truck-util \${utilClass}">\${util.toFixed(1)}% ocupado</span>
+        </div>
+        <div class="truck-canvas-wrap">
+          <canvas id="\${canvasId}" class="truck-canvas"></canvas>
+        </div>
+        <div class="truck-cargo-list">
+    \`;
+
+    truck.items.forEach((item, ii) => {
+      const color = PALETTE[ii % PALETTE.length];
+      const weightDisplay = item.p > 0 ? \`<div class="ci-dim" style="margin-left:6px">\${item.p}t</div>\` : '';
+      html += \`
+        <div class="cargo-item-row">
+          <div class="dot" style="background:\${color}"></div>
+          <div class="ci-name">\${item.desc}</div>
+          <div class="ci-dim">\${item.w.toFixed(2)}m × \${item.h.toFixed(2)}m</div>
+          \${weightDisplay}
+        </div>
+      \`;
+    });
+
+    const wUtil = truckMaxW > 0 ? (truck.weightUsed / truckMaxW * 100).toFixed(0) : '-';
+    html += \`
+          <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); display:flex; gap:16px; flex-wrap: wrap;">
+            <span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text-muted)">
+              Área: \${util.toFixed(1)}%
+            </span>
+            <span style="font-family:DM Mono,monospace;font-size:10px;color:var(--text-muted)">
+              Peso: \${truck.weightUsed.toFixed(2)}t / \${truckMaxW}t (\${wUtil}%)
+            </span>
+          </div>
+        </div>
+      </div>
+    \`;
+  });
+
+  html += '</div>';
+  panel.innerHTML = html;
+
+  // Draw canvases after DOM update
+  requestAnimationFrame(() => {
+    trucks.forEach((truck, ti) => {
+      const canvas = document.getElementById(\`canvas-\${ti}\`);
+      if (canvas) drawTruck(canvas, truck, truckC, truckL);
+    });
+  });
+}
+
+// ─── INIT ──────────────────────────────────────────────────────────────────────
+loadExample();
+</script>
+</body>
+</html>
