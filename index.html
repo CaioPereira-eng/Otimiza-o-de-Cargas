@@ -764,8 +764,9 @@
     if(sourceTruck) sourceTruck.items = sourceTruck.items.filter(i => i !== item);
     else UNPLACED_ITEMS = UNPLACED_ITEMS.filter(i => i !== item);
     const rectCanvas = targetZone.getBoundingClientRect();
-    const { truckC, truckL } = getTruckDims();
-    const scaleX = rectCanvas.width / truckC, scaleY = rectCanvas.height / truckL;
+    // Usa as dimensões específicas da carreta alvo
+    const truckCfg = targetTruck.config || getDefaultTruckConfig();
+    const scaleX = rectCanvas.width / truckCfg.truckC, scaleY = rectCanvas.height / truckCfg.truckL;
     item.x = (e.clientX - rectCanvas.left)/scaleX - item.w/2;
     item.y = (e.clientY - rectCanvas.top)/scaleY - item.h/2;
     targetTruck.items.push(item);
@@ -784,17 +785,18 @@
   }
   
   function validateItemPosition(item, truck) {
-    const { truckC, truckL, truckMaxW } = getTruckDims();
-    if(item.x<0||item.y<0||item.x+item.w>truckC||item.y+item.h>truckL) return false;
+    const truckCfg = truck.config || getDefaultTruckConfig();
+    const { truckMaxW } = getTruckDims();
+    if(item.x<0||item.y<0||item.x+item.w>truckCfg.truckC||item.y+item.h>truckCfg.truckL) return false;
     let totalWeight = item.p;
     for(let other of truck.items) if(other !== item) { if(rectanglesOverlap(item, other)) return false; totalWeight += other.p; }
-    return totalWeight <= truckMaxW;
+    return totalWeight <= (truckCfg.truckMaxW || truckMaxW);
   }
   
   function snapToBestPosition(item, truck) {
-    const { truckC, truckL } = getTruckDims();
-    for(let y=0; y<=truckL-item.h; y+=0.05) 
-      for(let x=0; x<=truckC-item.w; x+=0.05) {
+    const truckCfg = truck.config || getDefaultTruckConfig();
+    for(let y=0; y<=truckCfg.truckL-item.h; y+=0.05) 
+      for(let x=0; x<=truckCfg.truckC-item.w; x+=0.05) {
         item.x=x; item.y=y;
         if(validateItemPosition(item, truck)) return true;
       }
@@ -809,6 +811,15 @@
       margin: parseFloat(document.getElementById('truck-margin').value)||0
     };
   }
+
+  function getDefaultTruckConfig() {
+    const dims = getTruckDims();
+    return {
+      truckC: dims.truckC,
+      truckL: dims.truckL,
+      truckMaxW: dims.truckMaxW
+    };
+  }
   function updateWeights() { GLOBAL_TRUCKS.forEach(t => t.weightUsed = t.items.reduce((s,i)=>s+(i.p||0),0)); }
 
   // -------------------- RENDER VISUAL --------------------
@@ -816,7 +827,31 @@
     container.innerHTML = '';
     const w = container.clientWidth, h = container.clientHeight;
     if(!w || !h) return;
-    const sx = w/truckC, sy = h/truckL;
+    
+    // Calcula a escala mantendo as proporções
+    // A proporção visual deve ser a mesma da proporção real
+    const proportionRatio = truckC / truckL; // proporção comprimento/largura
+    
+    // Ajusta o tamanho do container para manter proporções
+    let displayW = w;
+    let displayH = h;
+    
+    // Calcula qual escala manter sem exceder o container
+    const maxScaleByWidth = w / truckC;
+    const maxScaleByHeight = h / truckL;
+    const scale = Math.min(maxScaleByWidth, maxScaleByHeight); // usa a menor escala
+    
+    displayW = truckC * scale;
+    displayH = truckL * scale;
+    
+    // Aplica os tamanhos ajustados
+    container.style.width = displayW + 'px';
+    container.style.height = displayH + 'px';
+    container.style.position = 'relative';
+    
+    const sx = displayW / truckC;
+    const sy = displayH / truckL;
+    
     truck.items.forEach((item, i) => {
       const div = document.createElement('div');
       div.className = 'cargo-box';
@@ -864,8 +899,10 @@
       <button class="btn btn-primary" onclick="addNewTruck()" style="margin-left:auto">+ CARRETA</button>
     </div><div class="trucks-grid">`;
     GLOBAL_TRUCKS.forEach((truck, ti) => {
+      // Usa as dimensões armazenadas da carreta, ou as globais como fallback
+      const truckCfg = truck.config || { truckC, truckL, truckMaxW };
       const usedArea = truck.items.reduce((s,i)=>s+i.w*i.h,0);
-      const util = (usedArea/(truckC*truckL)*100)||0;
+      const util = (usedArea/(truckCfg.truckC*truckCfg.truckL)*100)||0;
       html += `<div class="truck-card"><div class="truck-card-header"><div class="truck-id">Carreta <span>#${ti+1}</span></div>
       <span class="truck-util ${util>=75?'high':util>=50?'mid':'low'}">${util.toFixed(1)}%</span>
       <button class="btn btn-danger" style="padding:4px 8px; margin-left:auto" onclick="removeTruckById(${ti})">×</button></div>
@@ -882,7 +919,7 @@
         </div>`;
       });
       
-      html += `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;font-size:10px">⚖️ ${truck.weightUsed.toFixed(1)}t / ${truckMaxW}t &nbsp;📐 ${util.toFixed(1)}%</div>
+      html += `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;font-size:10px">⚖️ ${truck.weightUsed.toFixed(1)}t / ${truckCfg.truckMaxW}t &nbsp;📐 ${util.toFixed(1)}%</div>
       </div></div>`;
     });
     html += `</div><div class="unplaced-section"><div class="unplaced-title">🚫 NÃO ALOCADAS (${UNPLACED_ITEMS.length})</div><div id="unplaced-items"></div></div>`;
@@ -890,7 +927,10 @@
     setTimeout(() => {
       GLOBAL_TRUCKS.forEach((_,ti) => {
         const canvas = document.getElementById(`canvas-${ti}`);
-        if(canvas) renderTruckEditor(canvas, GLOBAL_TRUCKS[ti], truckC, truckL, ti);
+        if(canvas) {
+          const truckCfg = GLOBAL_TRUCKS[ti].config || getDefaultTruckConfig();
+          renderTruckEditor(canvas, GLOBAL_TRUCKS[ti], truckCfg.truckC, truckCfg.truckL, ti);
+        }
       });
       renderUnplaced();
     }, 50);
@@ -913,7 +953,16 @@
     }
   };
   
-  window.addNewTruck = () => { GLOBAL_TRUCKS.push({ maxRects:[], items:[], weightUsed:0 }); rerenderResults(); };
+  window.addNewTruck = () => { 
+    const config = getDefaultTruckConfig();
+    GLOBAL_TRUCKS.push({ 
+      config: config,
+      maxRects:[], 
+      items:[], 
+      weightUsed:0 
+    }); 
+    rerenderResults(); 
+  };
   window.removeTruckById = (idx) => { UNPLACED_ITEMS.push(...GLOBAL_TRUCKS[idx].items); GLOBAL_TRUCKS.splice(idx,1); rerenderResults(); };
   
   function runOptimization() {
@@ -926,6 +975,13 @@
     const margin = parseFloat(document.getElementById('truck-margin').value)||0;
     const allowRotate = document.getElementById('allow-rotate').checked;
     const { trucks, unplaced } = pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate);
+    
+    // Adiciona config a cada carreta
+    const config = { truckC, truckL, truckMaxW };
+    trucks.forEach(truck => {
+      truck.config = config;
+    });
+    
     GLOBAL_TRUCKS = trucks;
     UNPLACED_ITEMS = unplaced;
     updateWeights();
