@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CargoFit - Otimizador de Cargas</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
   :root {
     --bg: #f8fafc;
@@ -898,6 +900,7 @@
       <div class="stat-card"><div class="val">${GLOBAL_TRUCKS.reduce((a,t)=>a+t.items.length,0)}</div><div class="lbl">Alocadas</div></div>
       <div class="stat-card"><div class="val">${UNPLACED_ITEMS.length}</div><div class="lbl">Não Alocadas</div></div>
       <button class="btn btn-primary" onclick="addNewTruck()" style="margin-left:auto">+ CARRETA</button>
+      <button class="btn btn-primary" onclick="gerarRelatorioPDF()" style="background: var(--accent2); border-color: var(--accent2); margin-left: 10px;">GERAR PDF</button>
     </div><div class="trucks-grid">`;
     GLOBAL_TRUCKS.forEach((truck, ti) => {
       // Usa as dimensões armazenadas da carreta, ou as globais como fallback
@@ -920,7 +923,7 @@
         </div>`;
       });
       
-      html += `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;font-size:10px">⚖️ ${truck.weightUsed.toFixed(1)}t / ${truckCfg.truckMaxW}t &nbsp;📐 ${util.toFixed(1)}%</div>
+      html += `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;font-size:10px">${truck.weightUsed.toFixed(1)}t / ${truckCfg.truckMaxW}t | ${util.toFixed(1)}%</div>
       </div></div>`;
     });
     html += `</div><div class="unplaced-section"><div class="unplaced-title">NÃO ALOCADAS (${UNPLACED_ITEMS.length})</div><div id="unplaced-items"></div></div>`;
@@ -989,6 +992,99 @@
     rerenderResults();
     console.log(`Otimização concluída. Rotações: ${rotatedItemsCount}`);
   }
+  
+  window.gerarRelatorioPDF = async () => {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const marginPdf = 10;
+    let yOffset = marginPdf;
+    
+    pdf.setFontSize(20);
+    pdf.setTextColor(40, 40, 60);
+    pdf.text("Relatório de Otimização", marginPdf, yOffset);
+    yOffset += 10;
+    pdf.setFontSize(10);
+    pdf.setTextColor(100, 100, 120);
+    pdf.text(`Gerado em: ${new Date().toLocaleString()}`, marginPdf, yOffset);
+    yOffset += 8;
+    
+    const totalTrucks = GLOBAL_TRUCKS.length;
+    const totalItems = GLOBAL_TRUCKS.reduce((a,t)=>a+t.items.length,0);
+    const totalUnplaced = UNPLACED_ITEMS.length;
+    const { truckC, truckL, truckMaxW } = getTruckDims();
+    const usedAreaTotal = GLOBAL_TRUCKS.reduce((a,t)=> a + t.items.reduce((s,i)=>s+i.w*i.h,0),0);
+    const totalArea = totalTrucks * truckC * truckL;
+    const avgUtil = totalArea > 0 ? (usedAreaTotal/totalArea*100).toFixed(1) : 0;
+    
+    pdf.setFontSize(12);
+    pdf.text(`Carretas: ${totalTrucks} | Cargas alocadas: ${totalItems} | Não alocadas: ${totalUnplaced} | Ocupação média: ${avgUtil}%`, marginPdf, yOffset);
+    yOffset += 10;
+    
+    for (let i = 0; i < GLOBAL_TRUCKS.length; i++) {
+      const canvasElem = document.getElementById(`canvas-${i}`);
+      if (!canvasElem) continue;
+      const canvasImg = await html2canvas(canvasElem, { scale: 2, backgroundColor: '#f8fbff' });
+      const imgData = canvasImg.toDataURL('image/png');
+      const imgWidth = 180;
+      const imgHeight = (canvasImg.height * imgWidth) / canvasImg.width;
+      
+      if (yOffset + imgHeight + 30 > pdf.internal.pageSize.getHeight() - marginPdf) {
+        pdf.addPage();
+        yOffset = marginPdf;
+      }
+      
+      pdf.setFontSize(14);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text(`Carreta #${i+1}`, marginPdf, yOffset);
+      yOffset += 6;
+      pdf.addImage(imgData, 'PNG', marginPdf, yOffset, imgWidth, imgHeight);
+      yOffset += imgHeight + 5;
+      
+      const truck = GLOBAL_TRUCKS[i];
+      if (truck.items.length > 0) {
+        pdf.setFontSize(10);
+        pdf.setTextColor(60, 60, 80);
+        pdf.text("Cargas alocadas:", marginPdf, yOffset);
+        yOffset += 5;
+        let listText = "";
+        truck.items.forEach((it, idx) => {
+          const line = `${idx+1}. ${it.desc} - ${it.w.toFixed(2)}m x ${it.h.toFixed(2)}m - ${it.p}t`;
+          listText += line + "\n";
+        });
+        const lines = pdf.splitTextToSize(listText, imgWidth);
+        pdf.text(lines, marginPdf, yOffset);
+        yOffset += lines.length * 5 + 5;
+      } else {
+        pdf.text("Nenhuma carga alocada.", marginPdf, yOffset);
+        yOffset += 8;
+      }
+    }
+    
+    if (UNPLACED_ITEMS.length > 0) {
+      pdf.addPage();
+      yOffset = marginPdf;
+      pdf.setFontSize(14);
+      pdf.text("Cargas não alocadas", marginPdf, yOffset);
+      yOffset += 8;
+      pdf.setFontSize(10);
+      let unplacedText = "";
+      UNPLACED_ITEMS.forEach((it, idx) => {
+        unplacedText += `${idx+1}. ${it.desc} - ${it.w.toFixed(2)}m x ${it.h.toFixed(2)}m - ${it.p}t\n`;
+      });
+      const lines = pdf.splitTextToSize(unplacedText, 180);
+      pdf.text(lines, marginPdf, yOffset);
+    }
+    
+    const pageCount = pdf.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      pdf.setPage(i);
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 150, 170);
+      pdf.text(`Página ${i} de ${pageCount}`, pdf.internal.pageSize.getWidth() - 30, pdf.internal.pageSize.getHeight() - 10);
+    }
+    
+    pdf.save(`relatorio_cargofit_${new Date().toISOString().slice(0,19)}.pdf`);
+  } 
   
   // inicialização
   loadExample();
