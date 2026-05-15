@@ -380,6 +380,21 @@
     font-size: 11px;
     cursor: grab;
   }
+  .rotate-btn-list {
+    background: rgba(245,197,24,0.2);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    margin-left: auto;
+  }
+  .rotate-btn-list:hover {
+    background: var(--accent);
+    color: #000;
+  }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
@@ -496,7 +511,7 @@
     [[ 'Viga W460x82', 12, 0.46, 0.984, 2 ], [ 'Viga W250x38', 12, 0.262, 0.462, 3 ], [ 'TUBO 12"', 12, 0.304, 0.135, 4 ], [ 'TUBO 10"', 11, 0.254, 0.153, 3 ]].forEach(i => addCargoRow(i[0], i[1], i[2], i[3], i[4]));
   }
 
-  // ---------- IMPORTAÇÃO CORRIGIDA ----------
+  // ---------- IMPORTAÇÃO ----------
   function normalizeHeader(str) {
     return String(str || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
@@ -513,15 +528,13 @@
     
     let headerRow = null;
     let dataStart = 0;
-    let columnsMapping = null; // { desc, c, l, p, qty }
+    let columnsMapping = null;
     
-    // Tenta identificar cabeçalho
     for (let i = 0; i < Math.min(5, rows.length); i++) {
       const row = rows[i];
       if (!row || row.length < 2) continue;
       const headerStr = row.map(cell => normalizeHeader(String(cell))).join(' ');
       if (headerStr.includes('desc') || headerStr.includes('nome') || headerStr.includes('carga')) {
-        // Tenta mapear com cabeçalho
         const headers = row.map(cell => normalizeHeader(String(cell)));
         const idxDesc = headers.findIndex(h => h.includes('desc') || h.includes('nome') || h.includes('carga'));
         const idxC = headers.findIndex(h => h === 'c' || h.includes('compr'));
@@ -537,17 +550,12 @@
       }
     }
     
-    // Se não encontrou cabeçalho, assume que a primeira linha são dados
-    // e a ordem é: C, L, A, P, Quant (sem descrição)
     if (!columnsMapping) {
-      // Verifica se a primeira linha tem valores numéricos nas primeiras colunas
       const firstRow = rows[0];
       if (firstRow && firstRow.length >= 4 && isNumericColumn(firstRow.slice(0,4))) {
-        // Sem descrição: col0=C, col1=L, col2=A(ignorar), col3=P, col4=Quant
         columnsMapping = { desc: -1, c: 0, l: 1, p: 3, quant: 4 };
         dataStart = 0;
       } else {
-        // Fallback: assume que a primeira coluna é descrição
         columnsMapping = { desc: 0, c: 1, l: 2, p: 3, quant: 4 };
         dataStart = 0;
       }
@@ -761,11 +769,14 @@
     item.x = (e.clientX - rectCanvas.left)/scaleX - item.w/2;
     item.y = (e.clientY - rectCanvas.top)/scaleY - item.h/2;
     targetTruck.items.push(item);
+    // Tenta encontrar posição válida, se falhar mantém onde foi solto (mesmo com overlap)
     if(!validateItemPosition(item, targetTruck)) {
+      // tenta snap automático
       const success = snapToBestPosition(item, targetTruck);
       if(!success) {
-        targetTruck.items = targetTruck.items.filter(i => i !== item);
-        (sourceTruck ? sourceTruck.items : UNPLACED_ITEMS).push(item);
+        // mantém como está (com possível overlap)
+        // não remove, apenas avisa console
+        console.warn(`Item ${item.desc} solto em posição inválida (overlap/fora limites)`);
       }
     }
     updateWeights();
@@ -813,23 +824,7 @@
       div.style.width = (item.w * sx)+'px'; div.style.height = (item.h * sy)+'px';
       div.style.background = PALETTE[i%PALETTE.length];
       div.innerHTML = `<div class="cargo-label">${item.desc}</div>`;
-      const rotBtn = document.createElement('button');
-      rotBtn.innerHTML = '↻'; rotBtn.style.position='absolute'; rotBtn.style.top='2px'; rotBtn.style.right='2px';
-      rotBtn.style.zIndex='20'; rotBtn.style.fontSize='10px'; rotBtn.style.background='rgba(0,0,0,0.5)'; rotBtn.style.color='white';
-      rotBtn.style.border='none'; rotBtn.style.borderRadius='2px'; rotBtn.style.cursor='pointer';
-      rotBtn.addEventListener('click', (ev) => { 
-        ev.stopPropagation();
-        const oldW = item.w, oldH = item.h;
-        item.w = oldH; item.h = oldW;
-        item.rotated = !item.rotated;
-        if(!validateItemPosition(item, truck)) {
-          item.w = oldW; item.h = oldH;
-          item.rotated = !item.rotated;
-          alert('Rotação não permitida: sem espaço ou ultrapassa limites.');
-        }
-        rerenderResults();
-      });
-      div.appendChild(rotBtn);
+      // Botão de rotação removido da caixa gráfica
       enableDrag(div, item, truck);
       container.appendChild(div);
     });
@@ -848,6 +843,17 @@
     });
   }
   
+  function rotateItemInList(item, truck) {
+    // rotação sem validação de colisão
+    const oldW = item.w;
+    const oldH = item.h;
+    item.w = oldH;
+    item.h = oldW;
+    item.rotated = !item.rotated;
+    // Não valida overlap, apenas atualiza a tela
+    rerenderResults();
+  }
+  
   function rerenderResults() {
     const { truckC, truckL, truckMaxW } = getTruckDims();
     const panel = document.getElementById('results-panel');
@@ -864,8 +870,20 @@
       <span class="truck-util ${util>=75?'high':util>=50?'mid':'low'}">${util.toFixed(1)}%</span>
       <button class="btn btn-danger" style="padding:4px 8px; margin-left:auto" onclick="removeTruckById(${ti})">×</button></div>
       <div class="truck-canvas-wrap"><div id="canvas-${ti}" class="truck-editor" data-truck="${ti}"></div></div>
-      <div class="truck-cargo-list">${truck.items.map((it,ii)=>`<div class="cargo-item-row"><div class="dot" style="background:${PALETTE[ii%PALETTE.length]}"></div><div class="ci-name">${it.desc}</div><div>${it.w.toFixed(2)}x${it.h.toFixed(2)}m</div><div style="margin-left:6px">${it.p?it.p+'t':''}</div></div>`).join('')}
-      <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;font-size:10px">⚖️ ${truck.weightUsed.toFixed(1)}t / ${truckMaxW}t &nbsp;📐 ${util.toFixed(1)}%</div></div></div>`;
+      <div class="truck-cargo-list">`;
+      
+      truck.items.forEach((it, ii) => {
+        html += `<div class="cargo-item-row">
+          <div class="dot" style="background:${PALETTE[ii%PALETTE.length]}"></div>
+          <div class="ci-name">${it.desc}</div>
+          <div>${it.w.toFixed(2)}x${it.h.toFixed(2)}m</div>
+          <div style="margin-left:6px">${it.p?it.p+'t':''}</div>
+          <button class="rotate-btn-list" onclick="rotateItemInListByIndex(${ti}, ${ii})">↻ Rotacionar</button>
+        </div>`;
+      });
+      
+      html += `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;font-size:10px">⚖️ ${truck.weightUsed.toFixed(1)}t / ${truckMaxW}t &nbsp;📐 ${util.toFixed(1)}%</div>
+      </div></div>`;
     });
     html += `</div><div class="unplaced-section"><div class="unplaced-title">🚫 NÃO ALOCADAS (${UNPLACED_ITEMS.length})</div><div id="unplaced-items"></div></div>`;
     panel.innerHTML = html;
@@ -877,6 +895,23 @@
       renderUnplaced();
     }, 50);
   }
+  
+  // Função global para rotacionar item específico por índices
+  window.rotateItemInListByIndex = (truckIdx, itemIdx) => {
+    if (truckIdx >= 0 && truckIdx < GLOBAL_TRUCKS.length) {
+      const truck = GLOBAL_TRUCKS[truckIdx];
+      if (itemIdx >= 0 && itemIdx < truck.items.length) {
+        const item = truck.items[itemIdx];
+        const oldW = item.w;
+        const oldH = item.h;
+        item.w = oldH;
+        item.h = oldW;
+        item.rotated = !item.rotated;
+        // Não valida overlap, apenas atualiza
+        rerenderResults();
+      }
+    }
+  };
   
   window.addNewTruck = () => { GLOBAL_TRUCKS.push({ maxRects:[], items:[], weightUsed:0 }); rerenderResults(); };
   window.removeTruckById = (idx) => { UNPLACED_ITEMS.push(...GLOBAL_TRUCKS[idx].items); GLOBAL_TRUCKS.splice(idx,1); rerenderResults(); };
