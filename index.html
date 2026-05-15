@@ -18,7 +18,7 @@
     --text: #0f172a;
     --text-muted: #64748b;
     --truck-bg: #f8fbff;
-    --truck-border: #bfdbfe;
+    --truck-border: #f90606;
     --success: #16a34a;
     --danger: #dc2626;
   }
@@ -895,6 +895,8 @@
   function rerenderResults() {
     const { truckC, truckL, truckMaxW } = getTruckDims();
     const panel = document.getElementById('results-panel');
+    const prevScrollTop = panel.scrollTop;
+    const prevScrollLeft = panel.scrollLeft;
     let html = `<div class="stats-bar">
       <div class="stat-card"><div class="val">${GLOBAL_TRUCKS.length}</div><div class="lbl">Carretas</div></div>
       <div class="stat-card"><div class="val">${GLOBAL_TRUCKS.reduce((a,t)=>a+t.items.length,0)}</div><div class="lbl">Alocadas</div></div>
@@ -928,6 +930,8 @@
     });
     html += `</div><div class="unplaced-section"><div class="unplaced-title">NÃO ALOCADAS (${UNPLACED_ITEMS.length})</div><div id="unplaced-items"></div></div>`;
     panel.innerHTML = html;
+    panel.scrollTop = prevScrollTop;
+    panel.scrollLeft = prevScrollLeft;
     setTimeout(() => {
       GLOBAL_TRUCKS.forEach((_,ti) => {
         const canvas = document.getElementById(`canvas-${ti}`);
@@ -937,6 +941,8 @@
         }
       });
       renderUnplaced();
+      panel.scrollTop = prevScrollTop;
+      panel.scrollLeft = prevScrollLeft;
     }, 50);
   }
   
