@@ -398,6 +398,30 @@
     background: var(--accent);
     color: #000;
   }
+
+  .catalogo-item {
+    display: block;
+    width: 100%;
+    background: none;
+    border: none;
+    text-align: left;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .catalogo-item:hover { background: var(--surface2); }
+  .catalogo-nome {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .catalogo-dim {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
@@ -415,6 +439,31 @@
   <div class="panel-left">
     <div class="panel-section">
       <h3>Configuração da Carreta</h3>
+      <div class="truck-config" style="grid-template-columns:1fr; margin-bottom:10px;">
+        <div class="field-group">
+          <label>Nome / Identificação da Carreta</label>
+          <input type="text" id="truck-nome" placeholder="Ex: Carreta A, Placa XYZ-1234..." value="">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">
+        <span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Carretas catalogadas:</span>
+        <div style="position:relative;display:inline-block;" id="catalogo-wrap">
+          <button class="btn btn-ghost" style="padding:6px 12px;font-size:11px;" onclick="toggleCatalogo()">📋 Selecionar tipo ▾</button>
+          <div id="catalogo-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:4px;min-width:220px;box-shadow:0 4px 16px rgba(0,0,0,0.12);margin-top:4px;">
+            <div style="padding:6px 0;">
+              <div style="padding:4px 8px;font-family:'DM Mono',monospace;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);margin-bottom:4px;">Escolha o modelo</div>
+              <button class="catalogo-item" onclick="aplicarCatalogo('carga-seca')">
+                <div class="catalogo-nome">Carga Seca</div>
+                <div class="catalogo-dim">14,0m × 2,6m | 30t</div>
+              </button>
+              <button class="catalogo-item" onclick="aplicarCatalogo('wanderleia')">
+                <div class="catalogo-nome">Wanderleia</div>
+                <div class="catalogo-dim">19,5m × 3,0m | 45t</div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="truck-config">
         <div class="field-group"><label>Comprimento (m)</label><input type="number" id="truck-c" value="14" step="0.1" min="1"></div>
         <div class="field-group"><label>Largura (m)</label><input type="number" id="truck-l" value="2.6" step="0.1" min="0.5"></div>
@@ -422,7 +471,7 @@
         <div class="field-group"><label>Margem (m)</label><input type="number" id="truck-margin" value="0.1" step="0.05" min="0"></div>
       </div>
       <div class="rotate-toggle"><input type="checkbox" id="allow-rotate" checked> <label>Permitir rotação 90°</label></div>
-      <div class="tip">Padrão: 14m x 2,6m | 30t</div>
+      <div class="tip">Padrão: 14m x 2,6m | 30t — edite as dimensões livremente após selecionar um tipo</div>
     </div>
 
     <div class="cargo-section">
@@ -446,6 +495,36 @@
 </div>
 
 <script>
+  // -------------------- CATÁLOGO DE CARRETAS --------------------
+  const CATALOGO_CARRETAS = {
+    'carga-seca': { nome: 'Carga Seca', c: 14.0, l: 2.6, w: 30, margin: 0.1 },
+    'wanderleia':  { nome: 'Wanderleia', c: 19.5, l: 3.0, w: 45, margin: 0.1 }
+  };
+
+  function toggleCatalogo() {
+    const dd = document.getElementById('catalogo-dropdown');
+    dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+  }
+  window.aplicarCatalogo = (tipo) => {
+    const cfg = CATALOGO_CARRETAS[tipo];
+    if (!cfg) return;
+    document.getElementById('truck-nome').value    = cfg.nome;
+    document.getElementById('truck-c').value       = cfg.c;
+    document.getElementById('truck-l').value       = cfg.l;
+    document.getElementById('truck-w').value       = cfg.w;
+    document.getElementById('truck-margin').value  = cfg.margin;
+    document.getElementById('catalogo-dropdown').style.display = 'none';
+    document.querySelector('.tip').textContent = `${cfg.nome}: ${cfg.c}m × ${cfg.l}m | ${cfg.w}t — edite as dimensões livremente`;
+  };
+  // Fecha o dropdown ao clicar fora
+  document.addEventListener('click', (e) => {
+    const wrap = document.getElementById('catalogo-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      const dd = document.getElementById('catalogo-dropdown');
+      if (dd) dd.style.display = 'none';
+    }
+  });
+
   // -------------------- GLOBALS --------------------
   let cargoRows = [], rowId = 0;
   let GLOBAL_TRUCKS = [];
@@ -903,13 +982,15 @@
       <div class="stat-card"><div class="val">${UNPLACED_ITEMS.length}</div><div class="lbl">Não Alocadas</div></div>
       <button class="btn btn-primary" onclick="addNewTruck()" style="margin-left:auto">+ CARRETA</button>
       <button class="btn btn-primary" onclick="gerarRelatorioPDF()" style="background: var(--accent2); border-color: var(--accent2); margin-left: 10px;">GERAR PDF</button>
+      <button class="btn btn-primary" onclick="gerarRelatorioExcel()" style="background: var(--success); border-color: var(--success); margin-left: 10px;">GERAR EXCEL</button>
     </div><div class="trucks-grid">`;
     GLOBAL_TRUCKS.forEach((truck, ti) => {
       // Usa as dimensões armazenadas da carreta, ou as globais como fallback
       const truckCfg = truck.config || { truckC, truckL, truckMaxW };
       const usedArea = truck.items.reduce((s,i)=>s+i.w*i.h,0);
       const util = (usedArea/(truckCfg.truckC*truckCfg.truckL)*100)||0;
-      html += `<div class="truck-card"><div class="truck-card-header"><div class="truck-id">Carreta <span>#${ti+1}</span></div>
+      const nomeCarreta = truck.nome || `Carreta #${ti+1}`;
+      html += `<div class="truck-card"><div class="truck-card-header"><div class="truck-id"><span>${nomeCarreta}</span></div>
       <span class="truck-util ${util>=75?'high':util>=50?'mid':'low'}">${util.toFixed(1)}%</span>
       <button class="btn btn-danger" style="padding:4px 8px; margin-left:auto" onclick="removeTruckById(${ti})">×</button></div>
       <div class="truck-canvas-wrap"><div id="canvas-${ti}" class="truck-editor" data-truck="${ti}"></div></div>
@@ -963,15 +1044,18 @@
     }
   };
   
-  window.addNewTruck = () => { 
+  window.addNewTruck = () => {
     const config = getDefaultTruckConfig();
-    GLOBAL_TRUCKS.push({ 
-      config: config,
-      maxRects:[], 
-      items:[], 
-      weightUsed:0 
-    }); 
-    rerenderResults(); 
+    const nomeBase = document.getElementById('truck-nome').value.trim() || 'Carreta';
+    const ti = GLOBAL_TRUCKS.length + 1;
+    GLOBAL_TRUCKS.push({
+      config,
+      nome: `${nomeBase} #${ti}`,
+      maxRects: [],
+      items: [],
+      weightUsed: 0
+    });
+    rerenderResults();
   };
   window.removeTruckById = (idx) => { UNPLACED_ITEMS.push(...GLOBAL_TRUCKS[idx].items); GLOBAL_TRUCKS.splice(idx,1); rerenderResults(); };
   
@@ -986,10 +1070,11 @@
     const allowRotate = document.getElementById('allow-rotate').checked;
     const { trucks, unplaced } = pack2DMaximalRectangles(items, truckC, truckL, truckMaxW, margin, allowRotate);
     
-    // Adiciona config a cada carreta
-    const config = { truckC, truckL, truckMaxW };
-    trucks.forEach(truck => {
-      truck.config = config;
+    // Adiciona config (com nome) a cada carreta
+    const nomeBase = document.getElementById('truck-nome').value.trim() || 'Carreta';
+    trucks.forEach((truck, ti) => {
+      truck.config = { truckC, truckL, truckMaxW };
+      truck.nome = trucks.length === 1 ? nomeBase : `${nomeBase} #${ti+1}`;
     });
     
     GLOBAL_TRUCKS = trucks;
@@ -1090,7 +1175,154 @@
     }
     
     pdf.save(`relatorio_cargofit_${new Date().toISOString().slice(0,19)}.pdf`);
-  } 
+  }
+
+  // -------------------- EXPORTAÇÃO PARA EXCEL --------------------
+  // Monta uma aba "mapa" da carreta: um grid (em células mescladas) que
+  // reproduz visualmente a posição de cada carga dentro da carreta.
+  function buildTruckGridSheet(truck, truckCfg) {
+    const res = 0.25; // resolução do grid, em metros, por célula
+    const cols = Math.max(1, Math.ceil(truckCfg.truckC / res));
+    const rows = Math.max(1, Math.ceil(truckCfg.truckL / res));
+
+    const matrix = [];
+    const headerRow = ['C \\ L (m)'];
+    for (let c = 0; c < cols; c++) {
+      headerRow.push(c % 4 === 0 ? (c * res).toFixed(1) : '');
+    }
+    matrix.push(headerRow);
+    for (let r = 0; r < rows; r++) {
+      const row = [(r * res).toFixed(2)];
+      for (let c = 0; c < cols; c++) row.push('');
+      matrix.push(row);
+    }
+
+    const merges = [];
+    truck.items.forEach(item => {
+      const colStart = Math.max(0, Math.min(cols - 1, Math.round(item.x / res)));
+      const colEnd = Math.max(colStart, Math.min(cols - 1, Math.round((item.x + item.w) / res) - 1));
+      const rowStart = Math.max(0, Math.min(rows - 1, Math.round(item.y / res)));
+      const rowEnd = Math.max(rowStart, Math.min(rows - 1, Math.round((item.y + item.h) / res) - 1));
+
+      const label = `${item.desc}${item.p ? ' | ' + item.p + 't' : ''}`;
+      // +1 na linha por causa do cabeçalho, +1 na coluna por causa do rótulo de linha
+      matrix[rowStart + 1][colStart + 1] = label;
+      if (colEnd > colStart || rowEnd > rowStart) {
+        merges.push({ s: { r: rowStart + 1, c: colStart + 1 }, e: { r: rowEnd + 1, c: colEnd + 1 } });
+      }
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(matrix);
+    ws['!merges'] = merges;
+    ws['!cols'] = [{ wch: 10 }, ...Array(cols).fill({ wch: 7 })];
+    return ws;
+  }
+
+  window.gerarRelatorioExcel = () => {
+    if (GLOBAL_TRUCKS.length === 0 && UNPLACED_ITEMS.length === 0) {
+      alert('Nenhum resultado para exportar. Execute a otimização primeiro.');
+      return;
+    }
+    const { truckC, truckL, truckMaxW } = getTruckDims();
+    const wb = XLSX.utils.book_new();
+
+    // Função auxiliar: nome legível de cada carreta
+    const nomeTruck = (truck, ti) => truck.nome || `Carreta #${ti+1}`;
+    // Função auxiliar: nome seguro para aba (max 31 chars, sem caracteres inválidos)
+    const nomeAba = (str) => str.replace(/[:\\\/\?\*\[\]]/g, '-').slice(0, 31);
+
+    // ---------- ABA RESUMO GERAL ----------
+    const totalTrucks = GLOBAL_TRUCKS.length;
+    const totalItems  = GLOBAL_TRUCKS.reduce((a,t)=>a+t.items.length,0);
+    const totalUnplaced = UNPLACED_ITEMS.length;
+    const usedAreaTotal = GLOBAL_TRUCKS.reduce((a,t)=>a+t.items.reduce((s,i)=>s+i.w*i.h,0),0);
+    const totalArea = GLOBAL_TRUCKS.reduce((a,t)=>{ const c=t.config||{truckC,truckL}; return a+c.truckC*c.truckL; },0);
+    const avgUtil = totalArea > 0 ? (usedAreaTotal/totalArea*100).toFixed(1) : '0';
+
+    const resumoData = [
+      ['Relatório de Otimização — CargoFit'],
+      [`Gerado em: ${new Date().toLocaleString()}`],
+      [],
+      ['Resumo Geral'],
+      ['Carretas utilizadas', totalTrucks],
+      ['Cargas alocadas',     totalItems],
+      ['Cargas não alocadas', totalUnplaced],
+      ['Ocupação média (%)',   avgUtil],
+      [],
+      ['Carreta', 'C (m)', 'L (m)', 'Peso Máx (t)', 'Qtd. Cargas', 'Peso Usado (t)', 'Ocupação (%)', 'Cargas'],
+    ];
+    GLOBAL_TRUCKS.forEach((truck, ti) => {
+      const cfg = truck.config || { truckC, truckL, truckMaxW };
+      const usedArea = truck.items.reduce((s,i)=>s+i.w*i.h,0);
+      const util = (usedArea/(cfg.truckC*cfg.truckL)*100)||0;
+      const listaCargas = truck.items.map(it=>it.desc).join(' | ');
+      resumoData.push([
+        nomeTruck(truck, ti),
+        cfg.truckC, cfg.truckL, cfg.truckMaxW,
+        truck.items.length,
+        truck.weightUsed.toFixed(2),
+        util.toFixed(1),
+        listaCargas
+      ]);
+    });
+    const wsResumo = XLSX.utils.aoa_to_sheet(resumoData);
+    wsResumo['!cols'] = [{wch:26},{wch:8},{wch:8},{wch:12},{wch:12},{wch:14},{wch:12},{wch:60}];
+    XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo');
+
+    // ---------- ABA POR CARRETA (uma aba por carreta com lista de cargas + posição) ----------
+    GLOBAL_TRUCKS.forEach((truck, ti) => {
+      const cfg = truck.config || { truckC, truckL, truckMaxW };
+      const nome = nomeTruck(truck, ti);
+      const usedArea = truck.items.reduce((s,i)=>s+i.w*i.h,0);
+      const util = (usedArea/(cfg.truckC*cfg.truckL)*100)||0;
+
+      const data = [
+        [nome],
+        [`${cfg.truckC}m × ${cfg.truckL}m | Peso máx: ${cfg.truckMaxW}t | Ocupação: ${util.toFixed(1)}%`],
+        [],
+        ['#', 'Descrição', 'C (m)', 'L (m)', 'Peso (t)', 'Rotacionado', 'X ini (m)', 'Y ini (m)', 'X fim (m)', 'Y fim (m)'],
+      ];
+      truck.items.forEach((it, ii) => {
+        data.push([
+          ii+1,
+          it.desc,
+          parseFloat(it.w.toFixed(3)),
+          parseFloat(it.h.toFixed(3)),
+          it.p || 0,
+          it.rotated ? 'Sim' : 'Não',
+          parseFloat(it.x.toFixed(3)),
+          parseFloat(it.y.toFixed(3)),
+          parseFloat((it.x+it.w).toFixed(3)),
+          parseFloat((it.y+it.h).toFixed(3)),
+        ]);
+      });
+      data.push([]);
+      data.push(['Total de cargas', truck.items.length, '', '', truck.weightUsed.toFixed(2)+'t']);
+
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws['!cols'] = [{wch:4},{wch:26},{wch:8},{wch:8},{wch:8},{wch:11},{wch:10},{wch:10},{wch:10},{wch:10}];
+      XLSX.utils.book_append_sheet(wb, ws, nomeAba(nome));
+
+      // Mapa visual dessa carreta (grid de células)
+      const wsMap = buildTruckGridSheet(truck, cfg);
+      XLSX.utils.book_append_sheet(wb, wsMap, nomeAba(`Mapa ${nome}`));
+    });
+
+    // ---------- ABA NÃO ALOCADAS ----------
+    const naoAlocData = [
+      ['Cargas Não Alocadas'],
+      [],
+      ['Descrição', 'C (m)', 'L (m)', 'Peso (t)']
+    ];
+    UNPLACED_ITEMS.forEach(item => {
+      naoAlocData.push([item.desc, parseFloat(item.w.toFixed(3)), parseFloat(item.h.toFixed(3)), item.p || 0]);
+    });
+    const wsNaoAloc = XLSX.utils.aoa_to_sheet(naoAlocData);
+    wsNaoAloc['!cols'] = [{wch:28},{wch:10},{wch:10},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, wsNaoAloc, 'Não Alocadas');
+
+    XLSX.writeFile(wb, `cargofit_resultado_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.xlsx`);
+  };
   
   // inicialização
   loadExample();
